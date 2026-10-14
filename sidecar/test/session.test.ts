@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import type { Options, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-import { BLOCKED_TOOLS, READ_ONLY_DENY, SessionController, type QueryLike } from '../src/session';
+import { BLOCKED_TOOLS, READ_ONLY_DENY, readOnlyDecision, SessionController, type QueryLike } from '../src/session';
 import type { SidecarEvent } from '../../protocol/src/index';
 
 // A fake SDK query: records options, exposes the prompt stream, lets the test push SDK messages.
@@ -67,7 +67,8 @@ test('hello starts a read-only session with the right options', async () => {
   expect(o.includePartialMessages).toBe(true);
   expect(o.permissionMode).toBe('default');
   expect(o.resume).toBe('abc');
-  expect(o.disallowedTools).toEqual(BLOCKED_TOOLS);
+  expect(o.disallowedTools).toEqual([...BLOCKED_TOOLS]);
+  expect(BLOCKED_TOOLS).toEqual(expect.arrayContaining(['Bash', 'Write', 'Edit']));
   const verdict = await o.canUseTool!('Write', {}, { signal: new AbortController().signal } as any);
   expect(verdict).toEqual({ behavior: 'deny', message: READ_ONLY_DENY });
 });
@@ -125,4 +126,26 @@ test('a query that dies otherwise reports fatal', async () => {
   queries[0].fail(new Error('Claude Code process exited with code 1'));
   await tick();
   expect(events.at(-1)).toMatchObject({ t: 'error', code: 'fatal', message: expect.stringContaining('exited with code 1') });
+});
+
+test('readOnlyDecision allows read-only tools and denies everything else', () => {
+  expect(readOnlyDecision('Read')).toEqual({ allow: true });
+  for (const name of ['Monitor', 'WebFetch', 'mcp__claude_ai_Gmail__send_message']) {
+    expect(readOnlyDecision(name)).toEqual({ allow: false, reason: READ_ONLY_DENY });
+  }
+});
+
+test('hello installs a PreToolUse hook that denies tools outside the read-only allowlist', async () => {
+  const { ctl, queries } = setup();
+  await ctl.handle({ t: 'hello', protocol: 1, cwd: 'C:\\w' });
+  const matchers = queries[0].options.hooks?.PreToolUse;
+  expect(matchers?.length).toBe(1);
+  const hook = matchers![0].hooks[0];
+  const input = (tool_name: string) =>
+    ({ hook_event_name: 'PreToolUse', tool_name, tool_input: {}, tool_use_id: 't1', session_id: 's', transcript_path: '', cwd: 'C:\\w' }) as any;
+  const signal = { signal: new AbortController().signal };
+  expect(await hook(input('mcp__x__y'), 't1', signal)).toEqual({
+    hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: READ_ONLY_DENY },
+  });
+  expect(await hook(input('Grep'), 't1', signal)).toEqual({});
 });

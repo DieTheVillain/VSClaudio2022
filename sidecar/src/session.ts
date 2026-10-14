@@ -1,4 +1,4 @@
-import type { Options, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { HookCallback, Options, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { PROTOCOL_VERSION, type HostCommand, type SidecarEvent } from '../../protocol/src/index';
 import { Inbox } from './inbox';
 import { isLoginError, Translator } from './translate';
@@ -11,7 +11,28 @@ export type QueryFn = (args: { prompt: AsyncIterable<SDKUserMessage>; options: O
 
 export const READ_ONLY_DENY = 'VSClaudio is read-only in this version: it cannot edit files or run commands yet.';
 // Belt and braces with the deny-all canUseTool: user settings may pre-approve these tools.
-export const BLOCKED_TOOLS = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash', 'PowerShell'];
+export const BLOCKED_TOOLS = Object.freeze(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash', 'PowerShell']);
+
+// The only tools a session may run. Everything else (MCP tools, WebFetch, mutating built-ins) is
+// denied by a PreToolUse hook, which applies before any permissions.allow rule from user or repo
+// settings and also covers subagent tool calls.
+export const READ_ONLY_TOOLS = Object.freeze([
+  'Read', 'Grep', 'Glob', 'LS', 'NotebookRead', 'TodoWrite', 'ToolSearch', 'Task', 'Agent', 'WebSearch',
+]);
+
+export function readOnlyDecision(toolName: string): { allow: true } | { allow: false; reason: string } {
+  return READ_ONLY_TOOLS.includes(toolName) ? { allow: true } : { allow: false, reason: READ_ONLY_DENY };
+}
+
+// Returning no decision for allowed tools leaves the normal permission flow in charge.
+const readOnlyHook: HookCallback = async (input) => {
+  if (input.hook_event_name !== 'PreToolUse') return {};
+  const verdict = readOnlyDecision(input.tool_name);
+  if (verdict.allow) return {};
+  return {
+    hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: verdict.reason },
+  };
+};
 
 const NOT_FOUND =
   'Claude Code was not found. Install it (https://claude.com/claude-code), run `claude` once in a terminal to log in, then click Retry.';
@@ -86,7 +107,8 @@ export class SessionController {
         pathToClaudeCodeExecutable: claudePath,
         includePartialMessages: true,
         permissionMode: 'default',
-        disallowedTools: BLOCKED_TOOLS,
+        disallowedTools: [...BLOCKED_TOOLS],
+        hooks: { PreToolUse: [{ hooks: [readOnlyHook] }] },
         resume,
         canUseTool: async () => ({ behavior: 'deny', message: READ_ONLY_DENY }),
         stderr: (d) => this.deps.log(d),
