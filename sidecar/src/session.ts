@@ -37,6 +37,8 @@ const readOnlyHook: HookCallback = async (input) => {
 const NOT_FOUND =
   'Claude Code was not found. Install it (https://claude.com/claude-code), run `claude` once in a terminal to log in, then click Retry.';
 
+const SESSION_ENDED_EXIT_CODE = 3;
+
 const untrustedMessage = (cwd: string) =>
   `This folder hasn't been trusted in Claude Code yet. Open a terminal in ${cwd}, run \`claude\`, accept the trust prompt, then click Retry.`;
 
@@ -46,6 +48,7 @@ interface Deps {
   findClaude: (explicit?: string) => string | null;
   isTrusted: (cwd: string) => boolean;
   log: (s: string) => void;
+  exit: (code: number) => void;
 }
 interface Live {
   q: QueryLike;
@@ -127,6 +130,8 @@ export class SessionController {
     void this.pump(live);
   }
 
+  // When the active query ends for any reason other than a login problem, the sidecar exits
+  // non-zero: the host then ends the turn, shows "disconnected", and Reconnect resumes the session.
   private async pump(live: Live): Promise<void> {
     try {
       for await (const msg of live.q) {
@@ -137,9 +142,19 @@ export class SessionController {
       if (this.current !== live) return;
       const message = String(err?.message ?? err);
       this.deps.log(`session failed: ${message}\n`);
-      this.deps.emit({ t: 'error', code: isLoginError(message) ? 'not_logged_in' : 'fatal', message });
       this.current = null;
+      if (isLoginError(message)) {
+        this.deps.emit({ t: 'error', code: 'not_logged_in', message });
+        return;
+      }
+      this.deps.emit({ t: 'error', code: 'fatal', message });
+      this.deps.exit(SESSION_ENDED_EXIT_CODE);
+      return;
     }
+    if (this.current !== live) return;
+    this.deps.log('session ended unexpectedly\n');
+    this.current = null;
+    this.deps.exit(SESSION_ENDED_EXIT_CODE);
   }
 
   private stop(): void {

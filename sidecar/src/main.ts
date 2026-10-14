@@ -14,14 +14,18 @@ const controller = new SessionController({
   findClaude: (explicit) => findClaude(explicit, { env: process.env, home: os.homedir(), exists: fs.existsSync }),
   isTrusted: (cwd) => isTrustedOnDisk(cwd, os.homedir()),
   log,
+  exit: (code) => {
+    log(`session ended; exiting with code ${code}`);
+    exitSoon(code);
+  },
 });
 
 let exiting = false;
-function exitSoon() {
+function exitSoon(code = 0) {
   if (exiting) return;
   exiting = true;
-  // Give the SDK a moment to stop the CLI child cleanly.
-  setTimeout(() => process.exit(0), 300);
+  // Give the SDK a moment to stop the CLI child cleanly and stdout to flush.
+  setTimeout(() => process.exit(code), 300);
 }
 
 readCommands(

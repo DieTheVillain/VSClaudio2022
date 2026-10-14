@@ -34,14 +34,16 @@ class FakeQuery implements QueryLike {
 function setup(claude: string | null = 'C:\\claude.exe', trusted = true) {
   const events: SidecarEvent[] = [];
   const queries: FakeQuery[] = [];
+  const exits: number[] = [];
   const ctl = new SessionController({
     query: ({ prompt, options }) => { const q = new FakeQuery(prompt, options); queries.push(q); return q; },
     emit: (e) => events.push(e),
     findClaude: () => claude,
     isTrusted: () => trusted,
     log: () => {},
+    exit: (code) => exits.push(code),
   });
-  return { ctl, events, queries };
+  return { ctl, events, queries, exits };
 }
 const tick = () => new Promise((r) => setTimeout(r, 10));
 
@@ -113,20 +115,43 @@ test('send before hello reports a fatal error', async () => {
   expect(events[0]).toMatchObject({ t: 'error', code: 'fatal' });
 });
 
-test('a query that dies with a login error reports not_logged_in', async () => {
-  const { ctl, events, queries } = setup();
+test('a query that dies with a login error reports not_logged_in and keeps the sidecar running', async () => {
+  const { ctl, events, queries, exits } = setup();
   await ctl.handle({ t: 'hello', protocol: 1, cwd: 'C:\\w' });
   queries[0].fail(new Error('Invalid API key · Please run /login'));
   await tick();
   expect(events.at(-1)).toMatchObject({ t: 'error', code: 'not_logged_in' });
+  expect(exits).toEqual([]);
 });
 
-test('a query that dies otherwise reports fatal', async () => {
-  const { ctl, events, queries } = setup();
+test('a query that dies otherwise reports fatal, then exits non-zero', async () => {
+  const { ctl, events, queries, exits } = setup();
   await ctl.handle({ t: 'hello', protocol: 1, cwd: 'C:\\w' });
   queries[0].fail(new Error('Claude Code process exited with code 1'));
   await tick();
   expect(events.at(-1)).toMatchObject({ t: 'error', code: 'fatal', message: expect.stringContaining('exited with code 1') });
+  expect(exits).toHaveLength(1);
+  expect(exits[0]).not.toBe(0);
+});
+
+test('the active query ending normally exits non-zero', async () => {
+  const { ctl, queries, exits } = setup();
+  await ctl.handle({ t: 'hello', protocol: 1, cwd: 'C:\\w' });
+  queries[0].close();
+  await tick();
+  expect(exits).toHaveLength(1);
+  expect(exits[0]).not.toBe(0);
+});
+
+test('a replaced query ending or failing does not exit', async () => {
+  const { ctl, queries, exits } = setup();
+  await ctl.handle({ t: 'hello', protocol: 1, cwd: 'C:\\w' });
+  await ctl.handle({ t: 'new_session' });
+  queries[0].fail(new Error('late failure'));
+  await tick();
+  await ctl.handle({ t: 'shutdown' });
+  await tick();
+  expect(exits).toEqual([]);
 });
 
 test('readOnlyDecision allows read-only tools and denies everything else', () => {
