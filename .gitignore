@@ -1,0 +1,12 @@
+node_modules/
+dist/
+bin/
+obj/
+*.vsix
+*.user
+.vs/
+vsix/web/
+vsix/sidecar/
+.claude/
+.superpowers/
+docs/superpowers/
