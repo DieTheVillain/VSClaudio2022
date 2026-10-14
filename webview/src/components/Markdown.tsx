@@ -13,12 +13,20 @@ export function Markdown({ text }: { text: string }) {
         components={{
           pre: CodeBlock,
           a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
+          img: ImageLink,
         }}
       >
         {text}
       </ReactMarkdown>
     </div>
   );
+}
+
+// Images load on render, so a prompt-injected image URL could leak data. Show a link instead.
+function ImageLink({ node: _node, src, alt }: ComponentProps<'img'> & { node?: unknown }) {
+  const url = typeof src === 'string' ? src : '';
+  if (!/^https?:\/\//i.test(url)) return <>{alt}</>;
+  return <a href={url} target="_blank" rel="noreferrer">{alt || url}</a>;
 }
 
 function CodeBlock({ node: _node, children, ...rest }: ComponentProps<'pre'> & { node?: unknown }) {
