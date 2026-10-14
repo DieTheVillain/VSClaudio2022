@@ -112,6 +112,15 @@ describe('App', () => {
     expect(posted).toContainEqual({ t: 'reconnect' });
   });
 
+  test('an untrusted folder shows the trust setup card', async () => {
+    const { host, posted, push } = fakeHost();
+    render(<App host={host} />);
+    push({ t: 'error', code: 'untrusted_folder', message: "This folder hasn't been trusted in Claude Code yet." });
+    expect(screen.getByText('Trust this folder first')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(posted).toContainEqual({ t: 'reconnect' });
+  });
+
   test('new conversation clears the transcript and posts new_session', async () => {
     const { host, posted, push } = fakeHost();
     render(<App host={host} />);

@@ -1,7 +1,7 @@
 export const PROTOCOL_VERSION = 1;
 
 export type BlockKind = 'text' | 'thinking' | 'tool_use';
-export type ErrorCode = 'claude_not_found' | 'not_logged_in' | 'protocol_mismatch' | 'fatal';
+export type ErrorCode = 'claude_not_found' | 'not_logged_in' | 'protocol_mismatch' | 'untrusted_folder' | 'fatal';
 export type ConnectionState = 'starting' | 'connected' | 'disconnected' | 'no_workspace';
 
 /** Host (VS extension) -> sidecar, one JSON object per stdin line. */

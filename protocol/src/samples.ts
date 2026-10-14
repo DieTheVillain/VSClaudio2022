@@ -26,6 +26,7 @@ export const samples: {
     { t: 'turn_end', status: 'success', durationMs: 1234, costUsd: 0.01 },
     { t: 'turn_end', status: 'error', error: 'Overloaded' },
     { t: 'error', code: 'claude_not_found', message: 'Claude Code was not found.' },
+    { t: 'error', code: 'untrusted_folder', message: "This folder hasn't been trusted in Claude Code yet." },
   ],
   hostToWebview: [
     { t: 'status', state: 'connected' },

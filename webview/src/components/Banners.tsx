@@ -2,6 +2,7 @@ const TITLES: Record<string, string> = {
   claude_not_found: 'Claude Code needed',
   not_logged_in: 'Log in to Claude Code',
   protocol_mismatch: 'Extension needs a rebuild',
+  untrusted_folder: 'Trust this folder first',
 };
 
 export function SetupCard({ code, message, onRetry }: { code: string; message: string; onRetry: () => void }) {

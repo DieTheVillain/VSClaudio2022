@@ -37,10 +37,14 @@ const readOnlyHook: HookCallback = async (input) => {
 const NOT_FOUND =
   'Claude Code was not found. Install it (https://claude.com/claude-code), run `claude` once in a terminal to log in, then click Retry.';
 
+const untrustedMessage = (cwd: string) =>
+  `This folder hasn't been trusted in Claude Code yet. Open a terminal in ${cwd}, run \`claude\`, accept the trust prompt, then click Retry.`;
+
 interface Deps {
   query: QueryFn;
   emit: (e: SidecarEvent) => void;
   findClaude: (explicit?: string) => string | null;
+  isTrusted: (cwd: string) => boolean;
   log: (s: string) => void;
 }
 interface Live {
@@ -91,8 +95,12 @@ export class SessionController {
       this.deps.emit({ t: 'error', code: 'claude_not_found', message: NOT_FOUND });
       return;
     }
+    if (!this.deps.isTrusted(cmd.cwd)) {
+      this.deps.emit({ t: 'error', code: 'untrusted_folder', message: untrustedMessage(cmd.cwd) });
+      return;
+    }
     this.stop();
-    this.cfg = { cwd: cmd.cwd, claudePath };
+    this.cfg ={ cwd: cmd.cwd, claudePath };
     this.deps.emit({ t: 'ready', protocol: PROTOCOL_VERSION });
     this.start(cmd.resume);
   }

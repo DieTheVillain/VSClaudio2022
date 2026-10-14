@@ -84,6 +84,11 @@
       "t": "error",
       "code": "claude_not_found",
       "message": "Claude Code was not found."
+    },
+    {
+      "t": "error",
+      "code": "untrusted_folder",
+      "message": "This folder hasn't been trusted in Claude Code yet."
     }
   ],
   "hostToWebview": [

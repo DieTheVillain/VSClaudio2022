@@ -31,13 +31,14 @@ class FakeQuery implements QueryLike {
   }
 }
 
-function setup(claude: string | null = 'C:\\claude.exe') {
+function setup(claude: string | null = 'C:\\claude.exe', trusted = true) {
   const events: SidecarEvent[] = [];
   const queries: FakeQuery[] = [];
   const ctl = new SessionController({
     query: ({ prompt, options }) => { const q = new FakeQuery(prompt, options); queries.push(q); return q; },
     emit: (e) => events.push(e),
     findClaude: () => claude,
+    isTrusted: () => trusted,
     log: () => {},
   });
   return { ctl, events, queries };
@@ -148,4 +149,12 @@ test('hello installs a PreToolUse hook that denies tools outside the read-only a
     hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: READ_ONLY_DENY },
   });
   expect(await hook(input('Grep'), 't1', signal)).toEqual({});
+});
+
+test('hello in an untrusted folder reports untrusted_folder and starts nothing', async () => {
+  const { ctl, events, queries } = setup('C:\\claude.exe', false);
+  await ctl.handle({ t: 'hello', protocol: 1, cwd: 'C:\\w' });
+  expect(events).toEqual([{ t: 'error', code: 'untrusted_folder', message: expect.stringContaining("This folder hasn't been trusted") }]);
+  expect((events[0] as any).message).toContain('C:\\w');
+  expect(queries.length).toBe(0);
 });
