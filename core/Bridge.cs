@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Newtonsoft.Json.Linq;
 
 namespace VSClaudio.Core
 {
@@ -55,7 +56,7 @@ namespace VSClaudio.Core
                         if (_sidecar == null) ConnectLocked(_sessionId);
                         break;
                     case "send":
-                        var text = (string)message["text"];
+                        var text = Str(message, "text");
                         if (_sidecar != null && !string.IsNullOrWhiteSpace(text))
                         {
                             _turnRunning = true;
@@ -164,14 +165,14 @@ namespace VSClaudio.Core
                         SetStateLocked("connected");
                         break;
                     case "session":
-                        _sessionId = (string)message["sessionId"];
+                        _sessionId = Str(message, "sessionId");
                         break;
                     case "turn_end":
                         _turnRunning = false;
                         break;
                     case "error":
                         _turnRunning = false;
-                        _log.Info($"Sidecar error {message["code"]}: {message["message"]}");
+                        _log.Info($"Sidecar error {Str(message, "code")}: {Str(message, "message")}");
                         break;
                 }
                 PostLocked(line);
@@ -202,7 +203,16 @@ namespace VSClaudio.Core
             try { sidecar.Send(Protocol.Simple("shutdown")); }
             catch (Exception ex) { _log.Info("Shutdown send failed: " + ex.Message); }
             sidecar.Stop();
+
+            // The replaced sidecar's exit is ignored as stale, so end its turn here or the panel would keep it running.
+            if (_turnRunning)
+            {
+                _turnRunning = false;
+                PostLocked(Protocol.TurnEnd("interrupted", "Session restarted"));
+            }
         }
+
+        private static string Str(JObject message, string key) => (message[key] as JValue)?.Value as string;
 
         private void SetStateLocked(string state, string detail = null)
         {

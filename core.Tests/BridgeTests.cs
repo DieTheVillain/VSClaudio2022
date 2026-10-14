@@ -113,6 +113,30 @@ namespace VSClaudio.Core.Tests
         }
 
         [Fact]
+        public void ReconnectMidTurnEndsTheTurnOnce()
+        {
+            Ready();
+            _bridge.OnWebviewMessage("{\"t\":\"send\",\"text\":\"hi\"}");
+            _bridge.OnWebviewMessage("{\"t\":\"reconnect\"}");
+            var ended = _web.Posted.Select(JObject.Parse).Where(o => (string)o["t"] == "turn_end").ToList();
+            Assert.Single(ended);
+            Assert.Equal("interrupted", (string)ended[0]["status"]);
+            Assert.Equal("Session restarted", (string)ended[0]["error"]);
+            Current.Exit(0);
+            Assert.Single(_web.Posted.Select(JObject.Parse), o => (string)o["t"] == "turn_end");
+        }
+
+        [Fact]
+        public void NonStringFieldsDoNotThrow()
+        {
+            Ready();
+            Current.Emit("{\"t\":\"session\",\"sessionId\":{\"x\":1}}");
+            _bridge.OnWebviewMessage("{\"t\":\"send\",\"text\":[1]}");
+            Assert.Equal("session", (string)JObject.Parse(_web.Posted.Last())["t"]);
+            Assert.Single(Current.Sent);
+        }
+
+        [Fact]
         public void NoWorkspacePostsNoWorkspace()
         {
             _workspace = null;
