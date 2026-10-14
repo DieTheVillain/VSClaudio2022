@@ -16,9 +16,25 @@ namespace VSClaudio.Core
         private const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000;
         private readonly IntPtr _handle;
 
+        /// <summary>True only when the job exists and its kill-on-close limit was applied.</summary>
+        public bool IsActive { get; }
+
         private JobObject()
         {
-            _handle = CreateJobObject(IntPtr.Zero, null);
+            try
+            {
+                _handle = CreateJobObject(IntPtr.Zero, null);
+                if (_handle == IntPtr.Zero) return;
+                IsActive = ApplyKillOnClose();
+            }
+            catch (Exception)
+            {
+                // Leave IsActive false; the caller logs that the guarantee is unavailable.
+            }
+        }
+
+        private bool ApplyKillOnClose()
+        {
             var info = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION
             {
                 BasicLimitInformation = new JOBOBJECT_BASIC_LIMIT_INFORMATION { LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE },
@@ -28,7 +44,7 @@ namespace VSClaudio.Core
             try
             {
                 Marshal.StructureToPtr(info, ptr, false);
-                SetInformationJobObject(_handle, JobObjectExtendedLimitInformation, ptr, (uint)length);
+                return SetInformationJobObject(_handle, JobObjectExtendedLimitInformation, ptr, (uint)length);
             }
             finally
             {
@@ -36,7 +52,7 @@ namespace VSClaudio.Core
             }
         }
 
-        public bool Assign(Process process) => AssignProcessToJobObject(_handle, process.Handle);
+        public bool Assign(Process process) => IsActive && AssignProcessToJobObject(_handle, process.Handle);
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
         private static extern IntPtr CreateJobObject(IntPtr attributes, string name);

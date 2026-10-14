@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using Xunit;
 
 namespace VSClaudio.Core.Tests
@@ -82,5 +83,21 @@ namespace VSClaudio.Core.Tests
             Assert.True(done.Wait(TimeSpan.FromSeconds(15)));
             p.Send("{\"t\":\"interrupt\"}");
         }
+
+        [Fact]
+        public void StopUnderAContendedLockDoesNotDeadlock()
+        {
+            var p = Script("$w = New-Object IO.StreamWriter([Console]::OpenStandardOutput(), (New-Object Text.UTF8Encoding $false)); $w.AutoFlush = $true; for ($i = 0; $i -lt 200000; $i++) { $w.WriteLine($i) }");
+            var gate = new object();
+            var first = new ManualResetEventSlim();
+            p.LineReceived += _ => { first.Set(); lock (gate) { } };
+            p.Start();
+            Assert.True(first.Wait(TimeSpan.FromSeconds(15)), "no output");
+            var stop = Task.Run(() => { lock (gate) { p.Stop(); } });
+            Assert.True(stop.Wait(TimeSpan.FromSeconds(15)), "Stop deadlocked");
+        }
+
+        [Fact]
+        public void JobObjectIsActive() => Assert.True(JobObject.Shared.IsActive);
     }
 }

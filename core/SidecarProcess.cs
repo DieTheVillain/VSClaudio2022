@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using System.Threading.Tasks;
 
 namespace VSClaudio.Core
 {
@@ -10,6 +11,8 @@ namespace VSClaudio.Core
         // .NET Framework has no StandardInputEncoding; stdin defaults to the console code page, which mangles
         // non-ASCII text. Both directions use UTF-8 without a BOM.
         private static readonly Encoding Utf8 = new UTF8Encoding(false);
+
+        private static int _jobWarningLogged;
 
         private readonly string _exePath;
         private readonly string _arguments;
@@ -43,19 +46,38 @@ namespace VSClaudio.Core
             var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
             process.OutputDataReceived += (s, e) => { if (e.Data != null) LineReceived?.Invoke(e.Data); };
             process.ErrorDataReceived += (s, e) => { if (e.Data != null) _log.Info("sidecar: " + e.Data); };
-            process.Exited += (s, e) =>
-            {
-                // The parameterless overload waits until redirected output has been fully read.
-                process.WaitForExit();
-                Exited?.Invoke(process.ExitCode);
-            };
+            // On .NET Framework, WaitForExit(int) can raise Exited on the caller's thread (e.g. inside Stop() under the
+            // Bridge lock), so hand off before waiting on the output readers.
+            process.Exited += (s, e) => Task.Run(() => OnProcessExited(process));
 
             process.Start();
-            if (!JobObject.Shared.Assign(process)) _log.Info("Could not assign the sidecar to a job object.");
+            if (!JobObject.Shared.IsActive)
+            {
+                if (System.Threading.Interlocked.Exchange(ref _jobWarningLogged, 1) == 0)
+                    _log.Info("Kill-on-close job object unavailable; the sidecar may outlive Visual Studio.");
+            }
+            else if (!JobObject.Shared.Assign(process))
+            {
+                _log.Info("Could not assign the sidecar to a job object.");
+            }
             _stdin = new StreamWriter(process.StandardInput.BaseStream, Utf8) { AutoFlush = true, NewLine = "\n" };
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
             _process = process;
+        }
+
+        private void OnProcessExited(Process process)
+        {
+            try
+            {
+                // The parameterless overload waits until redirected output has been fully read.
+                process.WaitForExit();
+                Exited?.Invoke(process.ExitCode);
+            }
+            catch (Exception ex)
+            {
+                _log.Info("Sidecar exit handler failed: " + ex.Message);
+            }
         }
 
         public void Send(string line)
