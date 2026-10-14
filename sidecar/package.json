@@ -1,0 +1,11 @@
+{
+  "name": "vsclaudio-sidecar",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test",
+    "build": "bun build src/main.ts --compile --target=bun-windows-x64 --outfile ../vsix/sidecar/vsclaudio-sidecar.exe"
+  },
+  "dependencies": { "@anthropic-ai/claude-agent-sdk": "0.3.299" },
+  "devDependencies": { "typescript": "^5.6.0", "@types/bun": "^1.1.0" }
+}
