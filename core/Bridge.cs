@@ -50,10 +50,14 @@ namespace VSClaudio.Core
                 switch (Protocol.TypeOf(message))
                 {
                     case "webview_ready":
+                        // A repeat means the page reloaded (or its renderer was restarted) and lost its state.
+                        var reloaded = _webReady;
                         _webReady = true;
                         foreach (var p in _pending) _web.Post(p);
                         _pending.Clear();
                         if (_sidecar == null) ConnectLocked(_sessionId);
+                        else if (reloaded) _web.Post(Protocol.Status(State));
+                        if (reloaded && _lastTheme != null) _web.Post(_lastTheme);
                         break;
                     case "send":
                         var text = Str(message, "text");

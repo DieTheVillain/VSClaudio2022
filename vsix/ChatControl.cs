@@ -73,6 +73,17 @@ namespace VSClaudio
             var env = await CoreWebView2Environment.CreateAsync(null, dataDir);
             await _web.EnsureCoreWebView2Async(env);
             var core = _web.CoreWebView2;
+            // No Reload menu or browser shortcuts: a reload drops the transcript mid-session.
+            core.Settings.AreDefaultContextMenusEnabled = false;
+            core.Settings.AreBrowserAcceleratorKeysEnabled = false;
+            core.ProcessFailed += (s, e) =>
+            {
+                _log.Info($"WebView2 process failed: {e.ProcessFailedKind} ({e.Reason}).");
+                // The reloaded page sends webview_ready again and the bridge re-posts status and theme.
+                if (e.ProcessFailedKind == CoreWebView2ProcessFailedKind.RenderProcessExited
+                    || e.ProcessFailedKind == CoreWebView2ProcessFailedKind.RenderProcessUnresponsive)
+                    core.Reload();
+            };
             core.SetVirtualHostNameToFolderMapping("vsclaudio.local", Path.Combine(extensionDir, "web"), CoreWebView2HostResourceAccessKind.Allow);
             core.WebMessageReceived += (s, e) => _bridge.OnWebviewMessage(e.TryGetWebMessageAsString());
             core.NewWindowRequested += (s, e) =>

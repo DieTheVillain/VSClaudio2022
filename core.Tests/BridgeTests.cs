@@ -49,6 +49,22 @@ namespace VSClaudio.Core.Tests
         }
 
         [Fact]
+        public void SecondWebviewReadyRepostsStatusAndTheme()
+        {
+            Ready();
+            _bridge.PostTheme(new Dictionary<string, string> { ["--vsc-bg"] = "#000000" });
+            Current.Emit("{\"t\":\"ready\",\"protocol\":1}");
+            _web.Posted.Clear();
+
+            Ready(); // the page reloaded
+
+            Assert.Equal(new[] { "status", "theme" }, PostedTypes());
+            Assert.Equal("connected", (string)PostedStatuses().Single()["state"]);
+            Assert.Equal("#000000", (string)JObject.Parse(_web.Posted[1])["vars"]["--vsc-bg"]);
+            Assert.Single(_sidecars);
+        }
+
+        [Fact]
         public void ReadyPostsConnected()
         {
             Ready();
