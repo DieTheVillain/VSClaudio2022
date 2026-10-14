@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Threading;
@@ -125,10 +126,19 @@ namespace VSClaudio
             _bridge.Reconnect();
         }
 
-        private static void OpenExternal(string uri)
+        private void OpenExternal(string uri)
         {
-            if (Uri.TryCreate(uri, UriKind.Absolute, out var u) && (u.Scheme == Uri.UriSchemeHttps || u.Scheme == Uri.UriSchemeHttp))
+            if (!Uri.TryCreate(uri, UriKind.Absolute, out var u) || (u.Scheme != Uri.UriSchemeHttps && u.Scheme != Uri.UriSchemeHttp))
+                return;
+            // Runs inside a WebView2 event on the UI thread, so a failure here must not escape into Visual Studio.
+            try
+            {
                 Process.Start(new ProcessStartInfo(u.AbsoluteUri) { UseShellExecute = true });
+            }
+            catch (Exception ex) when (ex is Win32Exception || ex is InvalidOperationException)
+            {
+                _log.Info($"Could not open {u.AbsoluteUri}: {ex.Message}");
+            }
         }
     }
 }
