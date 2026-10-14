@@ -56,6 +56,20 @@ test('a never-streamed message is emitted whole', () => {
   ]);
 });
 
+test('split unstreamed messages sharing an id get distinct block keys', () => {
+  const tr = new Translator();
+  const out = [
+    { type: 'assistant', parent_tool_use_id: null, message: { id: 'm5', content: [{ type: 'thinking', thinking: 't' }] } },
+    { type: 'assistant', parent_tool_use_id: null, message: { id: 'm5', content: [{ type: 'text', text: 'x' }] } },
+  ].flatMap((m) => tr.translate(m));
+  expect(out).toEqual([
+    { t: 'block_start', key: 'm5:full:0', kind: 'thinking' },
+    { t: 'block_delta', key: 'm5:full:0', text: 't' },
+    { t: 'block_start', key: 'm5:full:1', kind: 'text' },
+    { t: 'block_delta', key: 'm5:full:1', text: 'x' },
+  ]);
+});
+
 test('tool results come from user messages', () => {
   const out = new Translator().translate({
     type: 'user', parent_tool_use_id: null,

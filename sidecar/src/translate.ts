@@ -20,6 +20,7 @@ export function isLoginError(text: string): boolean {
 
 export class Translator {
   private streamed = new Set<string>();
+  private fallbackBlocks = new Map<string, number>();
   private currentMessageId: string | null = null;
   private interruptRequested = false;
 
@@ -73,12 +74,16 @@ export class Translator {
   private assistant(m: any): SidecarEvent[] {
     const out: SidecarEvent[] = [];
     const wasStreamed = this.streamed.has(m?.id);
-    (m?.content ?? []).forEach((b: any, i: number) => {
+    (m?.content ?? []).forEach((b: any) => {
       if (b.type === 'tool_use') {
         if (!wasStreamed) out.push({ t: 'block_start', key: `${m.id}:tool:${b.id}`, kind: 'tool_use', toolUseId: b.id, name: b.name });
         out.push({ t: 'tool_input', toolUseId: b.id, name: b.name, input: b.input });
       } else if (!wasStreamed && (b.type === 'text' || b.type === 'thinking')) {
-        const key = `${m.id}:full:${i}`;
+        // The SDK can split one message into several assistant messages that share an id,
+        // so the fallback index is counted per message id rather than taken from the array position.
+        const n = this.fallbackBlocks.get(m.id) ?? 0;
+        this.fallbackBlocks.set(m.id, n + 1);
+        const key = `${m.id}:full:${n}`;
         out.push({ t: 'block_start', key, kind: b.type }, { t: 'block_delta', key, text: b.type === 'text' ? b.text : b.thinking });
       }
     });
