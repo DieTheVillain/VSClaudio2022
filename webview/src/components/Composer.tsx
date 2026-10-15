@@ -21,7 +21,7 @@ export function Composer({ running, disabled, onSend, onStop }: Props) {
         value={text}
         rows={3}
         disabled={disabled}
-        placeholder="Ask Claude about your code…"
+        placeholder="Ask Claude…"
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -34,11 +34,10 @@ export function Composer({ running, disabled, onSend, onStop }: Props) {
         }}
       />
       <div className="composer-bar">
-        <span className="hint">Enter to send · Shift+Enter for a new line</span>
         {running ? (
-          <button className="round-btn stop" onClick={onStop} aria-label="Stop" title="Stop (Esc)">■</button>
+          <button className="square-btn stop" onClick={onStop} aria-label="Stop" title="Stop (Esc)">■</button>
         ) : (
-          <button className="round-btn send" onClick={submit} disabled={disabled || !text.trim()} aria-label="Send" title="Send">↑</button>
+          <button className="square-btn send" onClick={submit} disabled={disabled || !text.trim()} aria-label="Send" title="Send">↑</button>
         )}
       </div>
     </div>
