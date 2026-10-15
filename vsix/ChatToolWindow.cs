@@ -19,6 +19,10 @@ namespace VSClaudio
         [Guid("6c2e9f1a-8b4d-4c37-a1e5-3d9f0b7c2e84")]
         internal class Pane : ToolkitToolWindowPane
         {
+            public Pane()
+            {
+                BitmapImageMoniker = ImageIds.Chat;
+            }
         }
     }
 }

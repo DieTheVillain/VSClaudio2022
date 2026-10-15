@@ -2,13 +2,12 @@
 <CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable" xmlns:xs="http://www.w3.org/2001/XMLSchema">
   <Extern href="stdidcmd.h" />
   <Extern href="vsshlids.h" />
-  <Include href="KnownImageIds.vsct" />
 
   <Commands package="guidVSClaudioPackage">
     <Buttons>
       <Button guid="guidVSClaudioCmdSet" id="OpenChat" priority="0x0100" type="Button">
         <Parent guid="guidSHLMainMenu" id="IDG_VS_WNDO_OTRWNDWS1" />
-        <Icon guid="ImageCatalogGuid" id="Comment" />
+        <Icon guid="guidVSClaudioImages" id="ChatIcon" />
         <CommandFlag>IconIsMoniker</CommandFlag>
         <Strings>
           <ButtonText>VSClaudio</ButtonText>
@@ -21,6 +20,10 @@
     <GuidSymbol name="guidVSClaudioPackage" value="{e3b7a2c4-6f1d-4a58-9b0e-2c7d5f8a1b36}" />
     <GuidSymbol name="guidVSClaudioCmdSet" value="{9a4c1e7b-3d2f-4b86-a5c0-7e1f2d3b4c59}">
       <IDSymbol name="OpenChat" value="0x0100" />
+    </GuidSymbol>
+    <!-- Must match Resources\VSClaudio.imagemanifest and ImageIds in PackageIds.cs. -->
+    <GuidSymbol name="guidVSClaudioImages" value="{363b2603-59d2-4284-9436-78c96fda961b}">
+      <IDSymbol name="ChatIcon" value="1" />
     </GuidSymbol>
   </Symbols>
 </CommandTable>

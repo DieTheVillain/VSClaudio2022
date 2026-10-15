@@ -1,4 +1,5 @@
 using System;
+using Microsoft.VisualStudio.Imaging.Interop;
 
 namespace VSClaudio
 {
@@ -13,5 +14,13 @@ namespace VSClaudio
     internal static class PackageIds
     {
         public const int OpenChat = 0x0100;
+    }
+
+    // Must match Resources\VSClaudio.imagemanifest and the guidVSClaudioImages symbol in the .vsct.
+    internal static class ImageIds
+    {
+        public static readonly Guid Images = new Guid("363b2603-59d2-4284-9436-78c96fda961b");
+        public const int ChatIcon = 1;
+        public static ImageMoniker Chat => new ImageMoniker { Guid = Images, Id = ChatIcon };
     }
 }

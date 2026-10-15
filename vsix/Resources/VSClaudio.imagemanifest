@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Registered with the VS image service; the guid and id must match ImageIds in PackageIds.cs and the .vsct. -->
+<ImageManifest xmlns="http://schemas.microsoft.com/VisualStudio/ImageManifestSchema/2014">
+  <Symbols>
+    <String Name="Resources" Value="/VSClaudio;component/Resources" />
+    <Guid Name="VSClaudioImages" Value="{363b2603-59d2-4284-9436-78c96fda961b}" />
+    <ID Name="ChatIcon" Value="1" />
+  </Symbols>
+  <Images>
+    <Image Guid="$(VSClaudioImages)" ID="$(ChatIcon)">
+      <Source Uri="$(Resources)/VSClaudio16.png">
+        <Size Value="16" />
+      </Source>
+      <Source Uri="$(Resources)/VSClaudio32.png">
+        <Size Value="32" />
+      </Source>
+    </Image>
+  </Images>
+  <ImageLists />
+</ImageManifest>
