@@ -17,7 +17,7 @@ export function App({ host }: { host: HostApi }) {
   const [state, dispatch] = useReducer(reducer, initialState);
 
   useEffect(() => {
-    const off = host.subscribe((msg) => dispatch({ type: 'host', msg }));
+    const off = host.subscribe((msg) => dispatch({ type: 'host', msg, at: Date.now() }));
     host.post({ t: 'webview_ready' });
     return off;
   }, [host]);
@@ -31,7 +31,7 @@ export function App({ host }: { host: HostApi }) {
   const ready = state.connection === 'connected' && !state.setup;
   const send = (text: string) => {
     if (state.running) return;
-    dispatch({ type: 'user_send', text });
+    dispatch({ type: 'user_send', text, at: Date.now() });
     host.post({ t: 'send', text });
   };
   const newConversation = () => {
