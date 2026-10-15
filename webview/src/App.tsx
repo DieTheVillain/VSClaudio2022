@@ -1,4 +1,5 @@
 import { useEffect, useReducer } from 'react';
+import { ClaudeMark } from './components/ClaudeMark';
 import { Composer } from './components/Composer';
 import { Disconnected, NoWorkspace, SetupCard } from './components/Banners';
 import { MessageList } from './components/MessageList';
@@ -42,12 +43,19 @@ export function App({ host }: { host: HostApi }) {
   return (
     <div className="app">
       <header className="header">
-        <span className="title">{state.model ?? 'Claude'}</span>
+        <span className="brand">
+          <ClaudeMark size={14} />
+          <span className="title">{state.model ?? 'Claude'}</span>
+        </span>
         <button className="icon-btn" onClick={newConversation} aria-label="New conversation" title="New conversation">+</button>
       </header>
-      <MessageList items={state.items} running={state.running} />
-      {ready && state.items.length === 0 && (
-        <div className="empty">Ask Claude about this solution. It can read and search your code; editing comes in a later version.</div>
+      {ready && state.items.length === 0 ? (
+        <div className="empty">
+          <ClaudeMark size={32} />
+          <p>Ask Claude about this solution. It can read and search your code; editing comes in a later version.</p>
+        </div>
+      ) : (
+        <MessageList items={state.items} running={state.running} />
       )}
       {state.setup && <SetupCard code={state.setup.code} message={state.setup.message} onRetry={() => host.post({ t: 'reconnect' })} />}
       {!state.setup && state.connection === 'disconnected' && (

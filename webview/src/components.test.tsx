@@ -1,4 +1,4 @@
-import { act, render, screen, fireEvent } from '@testing-library/react';
+import { act, render, screen, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, test, vi } from 'vitest';
 import type { HostToWebview, WebviewCommand } from '../../protocol/src/index';
@@ -222,6 +222,25 @@ describe('App', () => {
     push({ t: 'block_delta', key: 'm:0', text: 'Hello **there**' });
     push({ t: 'turn_end', status: 'success' });
     expect(screen.getByText('there').tagName).toBe('STRONG');
+  });
+
+  test('the header shows the Claude mark next to the title', () => {
+    const { host } = fakeHost();
+    const { container } = render(<App host={host} />);
+    const header = container.querySelector('header')!;
+    expect(within(header).getByRole('img', { name: 'Claude' })).toBeInTheDocument();
+    expect(within(header).getByText('Claude')).toHaveClass('title');
+  });
+
+  test('the empty state shows a larger mark once connected', () => {
+    const { host, push } = fakeHost();
+    render(<App host={host} />);
+    expect(screen.getAllByRole('img', { name: 'Claude' })).toHaveLength(1);
+    push({ t: 'status', state: 'connected' });
+    const marks = screen.getAllByRole('img', { name: 'Claude' });
+    expect(marks).toHaveLength(2);
+    expect(marks[1]).toHaveAttribute('width', '32');
+    expect(marks[0]).toHaveAttribute('width', '14');
   });
 
   test('setup card retry posts reconnect', async () => {

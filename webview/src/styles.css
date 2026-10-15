@@ -32,7 +32,9 @@ body { background: var(--vsc-bg); color: var(--vsc-fg); font: 13px/1.5 var(--fon
 
 .app { display: flex; flex-direction: column; height: 100%; }
 .header { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; border-bottom: 1px solid var(--vsc-border); }
+.header .brand { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .header .title { color: var(--vsc-muted); font-size: 12px; }
+.claude-mark { display: block; flex: none; }
 .icon-btn { background: none; border: 0; color: var(--vsc-fg); font-size: 16px; line-height: 1; width: 24px; height: 24px; border-radius: 4px; cursor: pointer; }
 .icon-btn:hover { background: var(--vsc-raised); }
 
@@ -54,7 +56,9 @@ body { background: var(--vsc-bg); color: var(--vsc-fg); font: 13px/1.5 var(--fon
 .tl-dot-ok { background: var(--vsc-ok); }
 .tl-dot-error { background: var(--vsc-error); }
 .tl-body { min-width: 0; }
-.empty, .status-line { padding: 0 14px 10px; color: var(--vsc-muted); }
+.status-line { padding: 0 14px 10px; color: var(--vsc-muted); }
+.empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 12px 24px; color: var(--vsc-muted); text-align: center; }
+.empty p { margin: 0; max-width: 320px; }
 .muted { color: var(--vsc-muted); }
 .small { font-size: 11px; }
 
