@@ -97,6 +97,11 @@ describe('reducer', () => {
     expect(s.items.map((i) => i.at)).toEqual([100, 700, undefined, 1000, 1100]);
   });
 
+  test('a fatal error closes an open thinking block', () => {
+    const s = run([host({ t: 'block_start', key: 'm:0', kind: 'thinking' }, 1000), host({ t: 'error', code: 'fatal', message: 'boom' }, 2500)]);
+    expect(s.items[0]).toMatchObject({ kind: 'thinking', startedAt: 1000, endedAt: 2500 });
+  });
+
   test('a notice that answers a user message is stamped', () => {
     const s = run([send('q', 100), host({ t: 'turn_end', status: 'error', error: 'Overloaded' }, 400)]);
     expect(s.items[1]).toMatchObject({ kind: 'notice', at: 400 });

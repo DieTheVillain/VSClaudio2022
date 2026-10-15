@@ -30,9 +30,8 @@
     <VSCTCompile Include="VSCommandTable.vsct" ResourceName="Menus.ctmenu" />
     <Content Include="web\**\*" IncludeInVSIX="true" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="sidecar\vsclaudio-sidecar.exe" IncludeInVSIX="true" CopyToOutputDirectory="PreserveNewest" />
-    <!-- The image service finds *.imagemanifest files in the extension folder; the manifest loads the PNGs from the assembly resources. -->
-    <Content Include="Resources\VSClaudio.imagemanifest" IncludeInVSIX="true" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="Resources\VSClaudio16.png;Resources\VSClaudio32.png" IncludeInVSIX="true" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The image service finds *.imagemanifest files at the extension root; the manifest loads the PNGs from the assembly resources. -->
+    <Content Include="Resources\VSClaudio.imagemanifest" Link="VSClaudio.imagemanifest" IncludeInVSIX="true" CopyToOutputDirectory="PreserveNewest" />
     <Resource Include="Resources\VSClaudio16.png;Resources\VSClaudio32.png" />
     <None Include="Resources\MakeIcon.ps1" />
   </ItemGroup>

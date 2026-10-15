@@ -103,7 +103,7 @@ function onHost(s: ChatState, msg: HostToWebview, at: number): ChatState {
       return withLocal(next, at, (id) => ({ kind: 'notice', id, level: 'error', text: msg.error ?? 'Something went wrong.' }));
     }
     case 'error':
-      if (msg.code === 'fatal') return withLocal({ ...s, running: false }, at, (id) => ({ kind: 'notice', id, level: 'error', text: msg.message }));
+      if (msg.code === 'fatal') return withLocal({ ...closeThinking(s, at), running: false }, at, (id) => ({ kind: 'notice', id, level: 'error', text: msg.message }));
       return { ...s, running: false, setup: { code: msg.code, message: msg.message } };
   }
 }
