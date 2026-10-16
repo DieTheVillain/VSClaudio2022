@@ -1,37 +1,22 @@
-import type { HookCallback, Options, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-import { PROTOCOL_VERSION, type HostCommand, type SidecarEvent } from '../../protocol/src/index';
+import type { Options, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import { PROTOCOL_VERSION, type HostCommand, type PermissionMode, type SidecarEvent } from '../../protocol/src/index';
+import { EditGate } from './editGate';
 import { Inbox } from './inbox';
+import { PermissionBroker } from './permissions';
 import { isLoginError, Translator } from './translate';
 
 export interface QueryLike extends AsyncIterable<any> {
   interrupt(): Promise<unknown>;
+  setPermissionMode(mode: PermissionMode): Promise<void>;
   close(): void;
 }
 export type QueryFn = (args: { prompt: AsyncIterable<SDKUserMessage>; options: Options }) => QueryLike;
 
-export const READ_ONLY_DENY = 'VSClaudio is read-only in this version: it cannot edit files or run commands yet.';
-// Belt and braces with the deny-all canUseTool: user settings may pre-approve these tools.
-export const BLOCKED_TOOLS = Object.freeze(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash', 'PowerShell']);
-
-// The only tools a session may run. Everything else (MCP tools, WebFetch, mutating built-ins) is
-// denied by a PreToolUse hook, which applies before any permissions.allow rule from user or repo
-// settings and also covers subagent tool calls.
-export const READ_ONLY_TOOLS = Object.freeze([
-  'Read', 'Grep', 'Glob', 'LS', 'NotebookRead', 'TodoWrite', 'ToolSearch', 'Task', 'Agent', 'WebSearch',
-]);
-
-export function readOnlyDecision(toolName: string): { allow: true } | { allow: false; reason: string } {
-  return READ_ONLY_TOOLS.includes(toolName) ? { allow: true } : { allow: false, reason: READ_ONLY_DENY };
-}
-
-// Returning no decision for allowed tools leaves the normal permission flow in charge.
-const readOnlyHook: HookCallback = async (input) => {
-  if (input.hook_event_name !== 'PreToolUse') return {};
-  const verdict = readOnlyDecision(input.tool_name);
-  if (verdict.allow) return {};
-  return {
-    hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: verdict.reason },
-  };
+const MODE_LABELS: Record<PermissionMode, string> = {
+  default: 'Ask before edits',
+  acceptEdits: 'Edit automatically',
+  plan: 'Plan',
+  auto: 'Auto',
 };
 
 const NOT_FOUND =
@@ -48,17 +33,21 @@ interface Deps {
   findClaude: (explicit?: string) => string | null;
   isTrusted: (cwd: string) => boolean;
   log: (s: string) => void;
+  readFile: (path: string) => string | null;
   exit: (code: number) => void;
 }
 interface Live {
   q: QueryLike;
   inbox: Inbox;
   translator: Translator;
+  broker: PermissionBroker;
+  gate: EditGate;
 }
 
 export class SessionController {
   private cfg: { cwd: string; claudePath: string } | null = null;
   private current: Live | null = null;
+  private mode: PermissionMode = 'default';
 
   constructor(private deps: Deps) {}
 
@@ -78,6 +67,14 @@ export class SessionController {
         this.current.translator.markInterrupt();
         await this.current.q.interrupt();
         return;
+      case 'permission_response':
+        this.current?.broker.respond(cmd);
+        return;
+      case 'edit_prepared':
+        this.current?.gate.ack(cmd.id);
+        return;
+      case 'set_mode':
+        return this.setMode(cmd.mode);
       case 'new_session':
         this.stop();
         if (this.cfg) this.start(undefined);
@@ -111,6 +108,13 @@ export class SessionController {
   private start(resume: string | undefined): void {
     const { cwd, claudePath } = this.cfg!;
     const inbox = new Inbox();
+    const broker = new PermissionBroker({
+      emit: this.deps.emit,
+      readFile: this.deps.readFile,
+      setMode: (m) => this.setMode(m),
+    });
+    const gate = new EditGate({ emit: this.deps.emit, log: this.deps.log });
+    this.mode = 'default';
     const q = this.deps.query({
       prompt: inbox,
       options: {
@@ -118,14 +122,13 @@ export class SessionController {
         pathToClaudeCodeExecutable: claudePath,
         includePartialMessages: true,
         permissionMode: 'default',
-        disallowedTools: [...BLOCKED_TOOLS],
-        hooks: { PreToolUse: [{ hooks: [readOnlyHook] }] },
+        hooks: { PreToolUse: [{ hooks: [gate.hook] }] },
         resume,
-        canUseTool: async () => ({ behavior: 'deny', message: READ_ONLY_DENY }),
+        canUseTool: broker.canUseTool,
         stderr: (d) => this.deps.log(d),
       },
     });
-    const live: Live = { q, inbox, translator: new Translator() };
+    const live: Live = { q, inbox, translator: new Translator(), broker, gate };
     this.current = live;
     void this.pump(live);
   }
@@ -136,7 +139,10 @@ export class SessionController {
     try {
       for await (const msg of live.q) {
         if (this.current !== live) return;
-        for (const ev of live.translator.translate(msg)) this.deps.emit(ev);
+        for (const ev of live.translator.translate(msg)) {
+          if (ev.t === 'mode') this.mode = ev.mode;
+          this.deps.emit(ev);
+        }
       }
     } catch (err: any) {
       if (this.current !== live) return;
@@ -157,10 +163,23 @@ export class SessionController {
     this.deps.exit(SESSION_ENDED_EXIT_CODE);
   }
 
+  // Applies a mode change to the live query. The broker also calls this when a plan is approved.
+  private async setMode(mode: PermissionMode): Promise<void> {
+    if (!this.current) return;
+    try {
+      await this.current.q.setPermissionMode(mode);
+      this.mode = mode;
+    } catch (err: any) {
+      this.deps.emit({ t: 'notice', level: 'error', text: `${MODE_LABELS[mode]} mode isn't available: ${String(err?.message ?? err)}` });
+    }
+    this.deps.emit({ t: 'mode', mode: this.mode });
+  }
+
   private stop(): void {
     if (!this.current) return;
     const live = this.current;
     this.current = null;
+    live.broker.cancelAll();
     live.inbox.close();
     live.q.close();
   }

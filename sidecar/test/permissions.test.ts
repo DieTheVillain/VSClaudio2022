@@ -188,9 +188,9 @@ test('resolves requests independently, in any order', async () => {
   broker.respond(respond('id1', { decision: 'deny' }));
   expect(broker.pendingCount).toBe(1);
   broker.respond(respond('id2', {}));
-  expect((await a).behavior).toBe('deny');
-  expect((await b).behavior).toBe('allow');
-  expect((await c).behavior).toBe('allow');
+  expect((await a)!.behavior).toBe('deny');
+  expect((await b)!.behavior).toBe('allow');
+  expect((await c)!.behavior).toBe('allow');
   expect(resolved(events).map((e: any) => e.id)).toEqual(['id3', 'id1', 'id2']);
 });
 

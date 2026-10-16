@@ -1,4 +1,6 @@
-import type { SidecarEvent } from '../../protocol/src/index';
+import type { PermissionMode, SidecarEvent } from '../../protocol/src/index';
+
+const PERMISSION_MODES: readonly string[] = ['default', 'acceptEdits', 'plan', 'auto'] satisfies PermissionMode[];
 
 export const MAX_TOOL_RESULT_CHARS = 20_000;
 
@@ -32,7 +34,7 @@ export class Translator {
     if (!msg || msg.parent_tool_use_id) return [];
     switch (msg.type) {
       case 'system':
-        return msg.subtype === 'init' ? [{ t: 'session', sessionId: msg.session_id, model: msg.model, cwd: msg.cwd }] : [];
+        return msg.subtype === 'init' ? this.init(msg) : [];
       case 'stream_event':
         return this.stream(msg.event);
       case 'assistant':
@@ -44,6 +46,12 @@ export class Translator {
       default:
         return [];
     }
+  }
+
+  private init(msg: any): SidecarEvent[] {
+    const out: SidecarEvent[] = [{ t: 'session', sessionId: msg.session_id, model: msg.model, cwd: msg.cwd }];
+    if (PERMISSION_MODES.includes(msg.permissionMode)) out.push({ t: 'mode', mode: msg.permissionMode });
+    return out;
   }
 
   private stream(ev: any): SidecarEvent[] {

@@ -14,6 +14,14 @@ const controller = new SessionController({
   findClaude: (explicit) => findClaude(explicit, { env: process.env, home: os.homedir(), exists: fs.existsSync }),
   isTrusted: (cwd) => isTrustedOnDisk(cwd, os.homedir()),
   log,
+  readFile: (p) => {
+    try {
+      return fs.readFileSync(p, 'utf8');
+    } catch (e: any) {
+      if (e?.code === 'ENOENT') return null;
+      throw e;
+    }
+  },
   exit: (code) => {
     log(`session ended; exiting with code ${code}`);
     exitSoon(code);

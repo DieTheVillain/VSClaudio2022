@@ -8,6 +8,18 @@ test('init becomes a session event', () => {
   expect(new Translator().translate(init)).toEqual([{ t: 'session', sessionId: 's1', model: 'claude-opus-5-5', cwd: 'C:\\a' }]);
 });
 
+test('init also emits the permission mode', () => {
+  expect(new Translator().translate({ ...init, permissionMode: 'acceptEdits' })).toEqual([
+    { t: 'session', sessionId: 's1', model: 'claude-opus-5-5', cwd: 'C:\\a' },
+    { t: 'mode', mode: 'acceptEdits' },
+  ]);
+});
+
+test('init with an unknown permission mode emits no mode', () => {
+  const out = new Translator().translate({ ...init, permissionMode: 'bypassPermissions' });
+  expect(out.map((e) => e.t)).toEqual(['session']);
+});
+
 test('streamed text and thinking become block_start/block_delta keyed by message and index', () => {
   const tr = new Translator();
   const out = [

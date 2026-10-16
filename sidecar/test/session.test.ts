@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import type { Options, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-import { BLOCKED_TOOLS, READ_ONLY_DENY, readOnlyDecision, SessionController, type QueryLike } from '../src/session';
+import { SessionController, type QueryLike } from '../src/session';
 import { PROTOCOL_VERSION, type SidecarEvent } from '../../protocol/src/index';
 
 // A fake SDK query: records options, exposes the prompt stream, lets the test push SDK messages.
@@ -9,6 +9,8 @@ class FakeQuery implements QueryLike {
   prompts: SDKUserMessage[] = [];
   interrupted = 0;
   closed = false;
+  modeCalls: string[] = [];
+  modeError: Error | null = null;
   private queue: any[] = [];
   private wake: (() => void) | null = null;
   private failure: Error | null = null;
@@ -19,6 +21,10 @@ class FakeQuery implements QueryLike {
   push(msg: any) { this.queue.push(msg); this.wake?.(); }
   fail(err: Error) { this.failure = err; this.wake?.(); }
   async interrupt() { this.interrupted++; return {}; }
+  async setPermissionMode(mode: string) {
+    this.modeCalls.push(mode);
+    if (this.modeError) throw this.modeError;
+  }
   close() { this.closed = true; this.wake?.(); }
   async *[Symbol.asyncIterator]() {
     while (true) {
@@ -41,6 +47,7 @@ function setup(claude: string | null = 'C:\\claude.exe', trusted = true) {
     findClaude: () => claude,
     isTrusted: () => trusted,
     log: () => {},
+    readFile: () => null,
     exit: (code) => exits.push(code),
   });
   return { ctl, events, queries, exits };
@@ -60,7 +67,7 @@ test('hello with the wrong protocol reports protocol_mismatch', async () => {
   expect(events[0]).toMatchObject({ t: 'error', code: 'protocol_mismatch' });
 });
 
-test('hello starts a read-only session with the right options', async () => {
+test('hello starts a session with the right options', async () => {
   const { ctl, events, queries } = setup();
   await ctl.handle({ t: 'hello', protocol: PROTOCOL_VERSION, cwd: 'C:\\w', resume: 'abc' });
   expect(events).toEqual([{ t: 'ready', protocol: PROTOCOL_VERSION }]);
@@ -70,10 +77,6 @@ test('hello starts a read-only session with the right options', async () => {
   expect(o.includePartialMessages).toBe(true);
   expect(o.permissionMode).toBe('default');
   expect(o.resume).toBe('abc');
-  expect(o.disallowedTools).toEqual([...BLOCKED_TOOLS]);
-  expect(BLOCKED_TOOLS).toEqual(expect.arrayContaining(['Bash', 'Write', 'Edit']));
-  const verdict = await o.canUseTool!('Write', {}, { signal: new AbortController().signal } as any);
-  expect(verdict).toEqual({ behavior: 'deny', message: READ_ONLY_DENY });
 });
 
 test('send pushes a human user message and SDK output is translated', async () => {
@@ -154,26 +157,74 @@ test('a replaced query ending or failing does not exit', async () => {
   expect(exits).toEqual([]);
 });
 
-test('readOnlyDecision allows read-only tools and denies everything else', () => {
-  expect(readOnlyDecision('Read')).toEqual({ allow: true });
-  for (const name of ['Monitor', 'WebFetch', 'mcp__claude_ai_Gmail__send_message']) {
-    expect(readOnlyDecision(name)).toEqual({ allow: false, reason: READ_ONLY_DENY });
-  }
-});
-
-test('hello installs a PreToolUse hook that denies tools outside the read-only allowlist', async () => {
+test('hello passes canUseTool and a PreToolUse hook (no allowlist)', async () => {
   const { ctl, queries } = setup();
   await ctl.handle({ t: 'hello', protocol: PROTOCOL_VERSION, cwd: 'C:\\w' });
-  const matchers = queries[0].options.hooks?.PreToolUse;
-  expect(matchers?.length).toBe(1);
-  const hook = matchers![0].hooks[0];
-  const input = (tool_name: string) =>
-    ({ hook_event_name: 'PreToolUse', tool_name, tool_input: {}, tool_use_id: 't1', session_id: 's', transcript_path: '', cwd: 'C:\\w' }) as any;
-  const signal = { signal: new AbortController().signal };
-  expect(await hook(input('mcp__x__y'), 't1', signal)).toEqual({
-    hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: READ_ONLY_DENY },
-  });
-  expect(await hook(input('Grep'), 't1', signal)).toEqual({});
+  const o = queries[0].options;
+  expect(typeof o.canUseTool).toBe('function');
+  expect(o.disallowedTools).toBeUndefined();
+  expect(o.hooks?.PreToolUse?.length).toBe(1);
+  const hook = o.hooks!.PreToolUse![0].hooks[0];
+  const input = { hook_event_name: 'PreToolUse', tool_name: 'mcp__x__y', tool_input: {}, tool_use_id: 't1', session_id: 's', transcript_path: '', cwd: 'C:\\w' } as any;
+  expect(await hook(input, 't1', { signal: new AbortController().signal })).toEqual({});
+});
+
+const toolOpts = (id = 'u1') => ({ signal: new AbortController().signal, toolUseID: id }) as any;
+
+test('permission_response is routed to the broker', async () => {
+  const { ctl, events, queries } = setup();
+  await ctl.handle({ t: 'hello', protocol: PROTOCOL_VERSION, cwd: 'C:\\w' });
+  const result = queries[0].options.canUseTool!('Bash', { command: 'ls' }, toolOpts());
+  const req = events.find((e) => e.t === 'permission_request') as any;
+  expect(req).toMatchObject({ toolName: 'Bash' });
+  await ctl.handle({ t: 'permission_response', id: req.id, decision: 'allow' } as any);
+  expect(await result).toMatchObject({ behavior: 'allow' });
+  expect(events.at(-1)).toMatchObject({ t: 'permission_resolved', id: req.id, outcome: 'allowed' });
+});
+
+test('edit_prepared acks the gate', async () => {
+  const { ctl, events, queries } = setup();
+  await ctl.handle({ t: 'hello', protocol: PROTOCOL_VERSION, cwd: 'C:\\w' });
+  const hook = queries[0].options.hooks!.PreToolUse![0].hooks[0];
+  const input = { hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: { file_path: 'C:\\w\\a.ts' }, tool_use_id: 't1', session_id: 's', transcript_path: '', cwd: 'C:\\w' } as any;
+  let done = false;
+  const run = hook(input, 't1', { signal: new AbortController().signal }).then(() => { done = true; });
+  await tick();
+  const prep = events.find((e) => e.t === 'prepare_edit') as any;
+  expect(prep).toMatchObject({ path: 'C:\\w\\a.ts' });
+  expect(done).toBe(false);
+  await ctl.handle({ t: 'edit_prepared', id: prep.id });
+  await run;
+  expect(done).toBe(true);
+});
+
+test('set_mode switches and emits mode', async () => {
+  const { ctl, events, queries } = setup();
+  await ctl.handle({ t: 'hello', protocol: PROTOCOL_VERSION, cwd: 'C:\\w' });
+  await ctl.handle({ t: 'set_mode', mode: 'acceptEdits' });
+  expect(queries[0].modeCalls).toEqual(['acceptEdits']);
+  expect(events.at(-1)).toEqual({ t: 'mode', mode: 'acceptEdits' });
+});
+
+test('set_mode failure emits a notice and the previous mode', async () => {
+  const { ctl, events, queries } = setup();
+  await ctl.handle({ t: 'hello', protocol: PROTOCOL_VERSION, cwd: 'C:\\w' });
+  await ctl.handle({ t: 'set_mode', mode: 'plan' });
+  queries[0].modeError = new Error('not allowed');
+  await ctl.handle({ t: 'set_mode', mode: 'auto' });
+  expect(events.slice(-2)).toEqual([
+    { t: 'notice', level: 'error', text: "Auto mode isn't available: not allowed" },
+    { t: 'mode', mode: 'plan' },
+  ]);
+});
+
+test('new_session cancels pending requests', async () => {
+  const { ctl, events, queries } = setup();
+  await ctl.handle({ t: 'hello', protocol: PROTOCOL_VERSION, cwd: 'C:\\w' });
+  const result = queries[0].options.canUseTool!('Bash', { command: 'ls' }, toolOpts());
+  await ctl.handle({ t: 'new_session' });
+  expect(await result).toMatchObject({ behavior: 'deny' });
+  expect(events.find((e) => e.t === 'permission_resolved')).toMatchObject({ outcome: 'cancelled' });
 });
 
 test('hello in an untrusted folder reports untrusted_folder and starts nothing', async () => {
