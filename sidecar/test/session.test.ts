@@ -52,6 +52,7 @@ function setup(claude: string | null = 'C:\\claude.exe', trusted = true) {
   });
   return { ctl, events, queries, exits };
 }
+const toolOpts = (id = 'u1') => ({ signal: new AbortController().signal, toolUseID: id }) as any;
 const tick = () => new Promise((r) => setTimeout(r, 10));
 
 test('hello without claude reports claude_not_found and starts nothing', async () => {
@@ -158,18 +159,21 @@ test('a replaced query ending or failing does not exit', async () => {
 });
 
 test('hello passes canUseTool and a PreToolUse hook (no allowlist)', async () => {
-  const { ctl, queries } = setup();
+  const { ctl, events, queries } = setup();
   await ctl.handle({ t: 'hello', protocol: PROTOCOL_VERSION, cwd: 'C:\\w' });
   const o = queries[0].options;
   expect(typeof o.canUseTool).toBe('function');
+  // The query's canUseTool must be the broker's: a request through it is resolved by permission_response.
+  const pending = o.canUseTool!('Bash', { command: 'ls' }, toolOpts());
+  const req = events.find((e) => e.t === 'permission_request') as any;
+  await ctl.handle({ t: 'permission_response', id: req.id, decision: 'allow' } as any);
+  expect(await pending).toMatchObject({ behavior: 'allow' });
   expect(o.disallowedTools).toBeUndefined();
   expect(o.hooks?.PreToolUse?.length).toBe(1);
   const hook = o.hooks!.PreToolUse![0].hooks[0];
   const input = { hook_event_name: 'PreToolUse', tool_name: 'mcp__x__y', tool_input: {}, tool_use_id: 't1', session_id: 's', transcript_path: '', cwd: 'C:\\w' } as any;
   expect(await hook(input, 't1', { signal: new AbortController().signal })).toEqual({});
 });
-
-const toolOpts = (id = 'u1') => ({ signal: new AbortController().signal, toolUseID: id }) as any;
 
 test('permission_response is routed to the broker', async () => {
   const { ctl, events, queries } = setup();
@@ -233,4 +237,58 @@ test('hello in an untrusted folder reports untrusted_folder and starts nothing',
   expect(events).toEqual([{ t: 'error', code: 'untrusted_folder', message: expect.stringContaining("This folder hasn't been trusted") }]);
   expect((events[0] as any).message).toContain('C:\\w');
   expect(queries.length).toBe(0);
+});
+
+const HELLO = { t: 'hello', protocol: PROTOCOL_VERSION, cwd: 'C:\\w' } as const;
+const resolvedEvents = (events: SidecarEvent[]) => events.filter((e) => e.t === 'permission_resolved');
+
+test('shutdown cancels pending requests', async () => {
+  const { ctl, events, queries } = setup();
+  await ctl.handle(HELLO);
+  const result = queries[0].options.canUseTool!('Bash', { command: 'ls' }, toolOpts());
+  await ctl.handle({ t: 'shutdown' });
+  expect(await result).toMatchObject({ behavior: 'deny' });
+  expect(resolvedEvents(events)).toMatchObject([{ outcome: 'cancelled' }]);
+});
+
+test('a second hello cancels pending requests', async () => {
+  const { ctl, events, queries } = setup();
+  await ctl.handle(HELLO);
+  const result = queries[0].options.canUseTool!('Bash', { command: 'ls' }, toolOpts());
+  await ctl.handle(HELLO);
+  expect(queries.length).toBe(2);
+  expect(await result).toMatchObject({ behavior: 'deny' });
+  expect(resolvedEvents(events)).toMatchObject([{ outcome: 'cancelled' }]);
+});
+
+test('stale permission_response after new_session is ignored', async () => {
+  const { ctl, events, queries } = setup();
+  await ctl.handle(HELLO);
+  const first = queries[0].options.canUseTool!('Bash', { command: 'ls' }, toolOpts());
+  const staleId = (events.find((e) => e.t === 'permission_request') as any).id;
+  await ctl.handle({ t: 'new_session' });
+  expect(await first).toMatchObject({ behavior: 'deny' });
+  const second = queries[1].options.canUseTool!('Bash', { command: 'pwd' }, toolOpts('u2'));
+  const before = events.length;
+  await ctl.handle({ t: 'permission_response', id: staleId, decision: 'allow' } as any);
+  expect(events.length).toBe(before);
+  // The new query's own request is untouched and still resolvable.
+  const liveId = (events.filter((e) => e.t === 'permission_request').at(-1) as any).id;
+  expect(liveId).not.toBe(staleId);
+  await ctl.handle({ t: 'permission_response', id: liveId, decision: 'allow' } as any);
+  expect(await second).toMatchObject({ behavior: 'allow' });
+});
+
+test('stale edit_prepared after new_session is ignored', async () => {
+  const { ctl, events, queries } = setup();
+  await ctl.handle(HELLO);
+  const hook = queries[0].options.hooks!.PreToolUse![0].hooks[0];
+  const input = { hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: { file_path: 'C:\\w\\a.ts' }, tool_use_id: 't1', session_id: 's', transcript_path: '', cwd: 'C:\\w' } as any;
+  void hook(input, 't1', { signal: new AbortController().signal });
+  await tick();
+  const prep = events.find((e) => e.t === 'prepare_edit') as any;
+  await ctl.handle({ t: 'new_session' });
+  const before = events.length;
+  await ctl.handle({ t: 'edit_prepared', id: prep.id });
+  expect(events.length).toBe(before);
 });

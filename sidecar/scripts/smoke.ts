@@ -1,12 +1,11 @@
 import { spawn } from 'node:child_process';
 import * as readline from 'node:readline';
 import * as path from 'node:path';
-import * as os from 'node:os';
-import * as fs from 'node:fs';
 import { PROTOCOL_VERSION } from '../../protocol/src/index';
 
 const exe = path.resolve(import.meta.dir, '..', '..', 'vsix', 'sidecar', 'vsclaudio-sidecar.exe');
-const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'vsclaudio-smoke-'));
+// Must be a folder Claude Code already trusts (the sidecar's trust gate refuses others); the repo root by default.
+const cwd = process.argv[2] ?? process.env.VSCLAUDIO_SMOKE_CWD ?? path.resolve(import.meta.dir, '..', '..');
 const child = spawn(exe, [], { stdio: ['pipe', 'pipe', 'inherit'] });
 const seen: string[] = [];
 const send = (o: unknown) => child.stdin.write(JSON.stringify(o) + '\n');
