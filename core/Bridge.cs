@@ -15,7 +15,11 @@ namespace VSClaudio.Core
         private readonly IWebviewPoster _web;
         private readonly ILog _log;
         private readonly Func<string> _workspace;
+        private readonly IEditReviewer _reviewer;
+        private readonly IEditorBuffers _buffers;
         private readonly List<string> _pending = new List<string>();
+        // Permission requests awaiting a decision, keyed by request id; holds the sidecar's original message.
+        private readonly Dictionary<string, JObject> _pendingRequests = new Dictionary<string, JObject>();
 
         private ISidecar _sidecar;
         private bool _webReady;
@@ -23,12 +27,15 @@ namespace VSClaudio.Core
         private bool _turnRunning;
         private string _lastTheme;
 
-        public Bridge(Func<ISidecar> sidecarFactory, IWebviewPoster web, ILog log, Func<string> workspace)
+        public Bridge(Func<ISidecar> sidecarFactory, IWebviewPoster web, ILog log, Func<string> workspace, IEditReviewer reviewer, IEditorBuffers buffers)
         {
             _sidecarFactory = sidecarFactory;
             _web = web;
             _log = log;
             _workspace = workspace;
+            _reviewer = reviewer;
+            _buffers = buffers;
+            if (_reviewer != null) _reviewer.Decided += OnReviewerDecided;
         }
 
         public string State { get; private set; } = "idle";
@@ -73,7 +80,17 @@ namespace VSClaudio.Core
                     case "new_session":
                         _sessionId = null;
                         _turnRunning = false;
+                        CancelPendingRequestsLocked();
                         _sidecar?.Send(Protocol.Simple("new_session"));
+                        break;
+                    case "permission_response":
+                    case "set_mode":
+                        // The sidecar owns the schema; pass the webview's line through unchanged.
+                        _sidecar?.Send(json);
+                        break;
+                    case "open_diff":
+                        var requestId = Str(message, "id");
+                        if (requestId != null && _pendingRequests.TryGetValue(requestId, out var request)) OpenReviewLocked(requestId, request);
                         break;
                     case "reconnect":
                         ConnectLocked(_sessionId);
@@ -151,8 +168,49 @@ namespace VSClaudio.Core
             sidecar.Send(Protocol.Hello(cwd, null, resume));
         }
 
+        private void OnReviewerDecided(string id, string decision)
+        {
+            lock (_gate)
+            {
+                // The sidecar answers with permission_resolved, which closes the tab and updates the card.
+                if (id == null || _sidecar == null || !_pendingRequests.ContainsKey(id)) return;
+                _sidecar.Send(Protocol.PermissionResponse(id, decision));
+            }
+        }
+
+        private void OpenReviewLocked(string id, JObject request)
+        {
+            if (_reviewer == null) return;
+            if (Str(request, "kind") != "edit" || (bool?)request["tooLarge"] == true) return;
+            _reviewer.Open(id, Str(request, "path"), Str(request, "original"), Str(request, "proposed"), (bool?)request["isNewFile"] == true);
+        }
+
+        // Tells the webview and the diff tab that requests the sidecar can no longer answer are cancelled.
+        private void CancelPendingRequestsLocked()
+        {
+            if (_pendingRequests.Count == 0) return;
+            var ids = new List<string>(_pendingRequests.Keys);
+            _pendingRequests.Clear();
+            foreach (var id in ids)
+            {
+                PostLocked(Protocol.PermissionResolved(id, "cancelled"));
+                _reviewer?.Close(id);
+            }
+        }
+
+        private void OnEditPrepared(ISidecar sidecar, string id)
+        {
+            lock (_gate)
+            {
+                if (sidecar != _sidecar) return;
+                sidecar.Send(Protocol.EditPrepared(id));
+            }
+        }
+
         private void OnSidecarLine(ISidecar sidecar, string line)
         {
+            Action afterLock = null;
+            var forward = true;
             lock (_gate)
             {
                 if (sidecar != _sidecar) return;
@@ -178,9 +236,34 @@ namespace VSClaudio.Core
                         _turnRunning = false;
                         _log.Info($"Sidecar error {Str(message, "code")}: {Str(message, "message")}");
                         break;
+                    case "permission_request":
+                        var requestId = Str(message, "id");
+                        if (requestId != null)
+                        {
+                            _pendingRequests[requestId] = message;
+                            OpenReviewLocked(requestId, message);
+                        }
+                        break;
+                    case "permission_resolved":
+                        var resolvedId = Str(message, "id");
+                        if (resolvedId != null && _pendingRequests.Remove(resolvedId)) _reviewer?.Close(resolvedId);
+                        break;
+                    case "prepare_edit":
+                        // Host-only handshake: save the buffer (outside the lock), then acknowledge.
+                        var editId = Str(message, "id");
+                        var editPath = Str(message, "path");
+                        afterLock = () =>
+                        {
+                            if (_buffers == null) OnEditPrepared(sidecar, editId);
+                            else _buffers.SaveIfDirty(editPath, () => OnEditPrepared(sidecar, editId));
+                        };
+                        forward = false;
+                        break;
                 }
-                PostLocked(line);
+                if (forward) PostLocked(line);
             }
+
+            afterLock?.Invoke();
         }
 
         private void OnSidecarExited(ISidecar sidecar, int code)
@@ -190,6 +273,7 @@ namespace VSClaudio.Core
                 if (sidecar != _sidecar) return;
                 _sidecar = null;
                 _log.Info($"Sidecar exited with code {code}.");
+                CancelPendingRequestsLocked();
                 if (_turnRunning)
                 {
                     _turnRunning = false;
@@ -201,6 +285,7 @@ namespace VSClaudio.Core
 
         private void StopLocked()
         {
+            CancelPendingRequestsLocked();
             if (_sidecar == null) return;
             var sidecar = _sidecar;
             _sidecar = null;

@@ -27,4 +27,22 @@ namespace VSClaudio.Core.Tests
         public readonly List<string> Lines = new List<string>();
         public void Info(string message) => Lines.Add(message);
     }
+
+    internal sealed class FakeReviewer : IEditReviewer
+    {
+        public readonly List<(string Id, string Path, string Original, string Proposed, bool IsNew)> Opened = new List<(string, string, string, string, bool)>();
+        public readonly List<string> Closed = new List<string>();
+        public event Action<string, string> Decided;
+        public void Open(string id, string path, string original, string proposed, bool isNewFile) => Opened.Add((id, path, original, proposed, isNewFile));
+        public void Close(string id) => Closed.Add(id);
+        public void Decide(string id, string decision) => Decided?.Invoke(id, decision);
+    }
+
+    internal sealed class FakeBuffers : IEditorBuffers
+    {
+        public readonly List<string> Saved = new List<string>();
+        public readonly List<Action> Completions = new List<Action>();
+        public void SaveIfDirty(string path, Action done) { Saved.Add(path); Completions.Add(done); }
+        public void CompleteAll() { foreach (var c in Completions) c(); }
+    }
 }

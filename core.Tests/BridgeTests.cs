@@ -11,11 +11,13 @@ namespace VSClaudio.Core.Tests
         private readonly FakePoster _web = new FakePoster();
         private readonly FakeLog _log = new FakeLog();
         private string _workspace = @"C:\src\App";
+        private readonly FakeReviewer _reviewer = new FakeReviewer();
+        private readonly FakeBuffers _buffers = new FakeBuffers();
         private readonly Bridge _bridge;
 
         public BridgeTests()
         {
-            _bridge = new Bridge(() => { var s = new FakeSidecar(); _sidecars.Add(s); return s; }, _web, _log, () => _workspace);
+            _bridge = new Bridge(() => { var s = new FakeSidecar(); _sidecars.Add(s); return s; }, _web, _log, () => _workspace, _reviewer, _buffers);
         }
 
         private FakeSidecar Current => _sidecars.Last();
@@ -228,6 +230,181 @@ namespace VSClaudio.Core.Tests
             _bridge.Dispose();
             Assert.True(s.Stopped);
             Assert.Equal("shutdown", (string)JObject.Parse(s.Sent.Last())["t"]);
+        }
+
+        private const string EditRequest = "{\"t\":\"permission_request\",\"id\":\"p1\",\"kind\":\"edit\",\"path\":\"C:\\\\src\\\\a.cs\",\"original\":\"old\",\"proposed\":\"new\",\"isNewFile\":false}";
+
+        private void ConnectWithEditRequest()
+        {
+            Ready();
+            Current.Emit(EditRequest);
+        }
+
+        [Fact]
+        public void EditRequestOpensReviewerAndReachesWebview()
+        {
+            ConnectWithEditRequest();
+            var open = Assert.Single(_reviewer.Opened);
+            Assert.Equal(("p1", @"C:\src\a.cs", "old", "new", false), open);
+            Assert.Equal(EditRequest, _web.Posted.Last());
+        }
+
+        [Fact]
+        public void ToolRequestDoesNotOpenReviewer()
+        {
+            Ready();
+            var line = "{\"t\":\"permission_request\",\"id\":\"p2\",\"kind\":\"tool\",\"toolName\":\"Bash\"}";
+            Current.Emit(line);
+            Assert.Empty(_reviewer.Opened);
+            Assert.Equal(line, _web.Posted.Last());
+        }
+
+        [Fact]
+        public void TooLargeEditDoesNotOpenReviewer()
+        {
+            Ready();
+            var line = "{\"t\":\"permission_request\",\"id\":\"p3\",\"kind\":\"edit\",\"path\":\"x\",\"tooLarge\":true}";
+            Current.Emit(line);
+            Assert.Empty(_reviewer.Opened);
+            Assert.Equal(line, _web.Posted.Last());
+        }
+
+        [Fact]
+        public void WebviewResponseIsForwardedVerbatim()
+        {
+            Ready();
+            var line = "{\"t\":\"permission_response\",\"id\":\"p1\",\"decision\":\"deny\",\"message\":\"no\"}";
+            _bridge.OnWebviewMessage(line);
+            Assert.Equal(line, Current.Sent.Last());
+        }
+
+        [Fact]
+        public void SetModeIsForwardedVerbatim()
+        {
+            Ready();
+            var line = "{\"t\":\"set_mode\",\"mode\":\"plan\"}";
+            _bridge.OnWebviewMessage(line);
+            Assert.Equal(line, Current.Sent.Last());
+        }
+
+        [Fact]
+        public void ReviewerDecisionSendsResponseToSidecar()
+        {
+            ConnectWithEditRequest();
+            _reviewer.Decide("p1", "allow");
+            var sent = JObject.Parse(Current.Sent.Last());
+            Assert.Equal("permission_response", (string)sent["t"]);
+            Assert.Equal("p1", (string)sent["id"]);
+            Assert.Equal("allow", (string)sent["decision"]);
+        }
+
+        [Fact]
+        public void ReviewerDecisionForUnknownIdIsIgnored()
+        {
+            ConnectWithEditRequest();
+            var before = Current.Sent.Count;
+            _reviewer.Decide("nope", "allow");
+            Assert.Equal(before, Current.Sent.Count);
+        }
+
+        [Fact]
+        public void ResolvedClosesReviewerAndForwards()
+        {
+            ConnectWithEditRequest();
+            var line = "{\"t\":\"permission_resolved\",\"id\":\"p1\",\"outcome\":\"allowed\"}";
+            Current.Emit(line);
+            Assert.Equal(new[] { "p1" }, _reviewer.Closed);
+            Assert.Equal(line, _web.Posted.Last());
+            var before = Current.Sent.Count;
+            _reviewer.Decide("p1", "allow"); // no longer pending
+            Assert.Equal(before, Current.Sent.Count);
+        }
+
+        [Fact]
+        public void OpenDiffReopensPendingEdit()
+        {
+            ConnectWithEditRequest();
+            _bridge.OnWebviewMessage("{\"t\":\"open_diff\",\"id\":\"p1\"}");
+            Assert.Equal(2, _reviewer.Opened.Count);
+            Assert.Equal(_reviewer.Opened[0], _reviewer.Opened[1]);
+            _bridge.OnWebviewMessage("{\"t\":\"open_diff\",\"id\":\"unknown\"}");
+            Assert.Equal(2, _reviewer.Opened.Count);
+        }
+
+        [Fact]
+        public void PrepareEditSavesThenAcksAndIsNotForwarded()
+        {
+            Ready();
+            var before = _web.Posted.Count;
+            Current.Emit("{\"t\":\"prepare_edit\",\"id\":\"e1\",\"path\":\"C:\\\\src\\\\a.cs\"}");
+            Assert.Equal(new[] { @"C:\src\a.cs" }, _buffers.Saved);
+            Assert.Equal(before, _web.Posted.Count);
+            Assert.DoesNotContain(Current.Sent, l => l.Contains("edit_prepared"));
+            _buffers.CompleteAll();
+            var ack = JObject.Parse(Current.Sent.Last());
+            Assert.Equal("edit_prepared", (string)ack["t"]);
+            Assert.Equal("e1", (string)ack["id"]);
+        }
+
+        [Fact]
+        public void PrepareEditAckSkippedAfterSidecarReplaced()
+        {
+            Ready();
+            var first = Current;
+            first.Emit("{\"t\":\"prepare_edit\",\"id\":\"e1\",\"path\":\"a\"}");
+            _bridge.Reconnect();
+            _buffers.CompleteAll();
+            Assert.DoesNotContain(first.Sent, l => l.Contains("edit_prepared"));
+            Assert.DoesNotContain(Current.Sent, l => l.Contains("edit_prepared"));
+        }
+
+        [Fact]
+        public void ExitCancelsPendingRequests()
+        {
+            ConnectWithEditRequest();
+            var sent = Current.Sent.Count;
+            Current.Exit(1);
+            var cancelled = _web.Posted.Select(JObject.Parse).Single(o => (string)o["t"] == "permission_resolved");
+            Assert.Equal("p1", (string)cancelled["id"]);
+            Assert.Equal("cancelled", (string)cancelled["outcome"]);
+            Assert.Equal(new[] { "p1" }, _reviewer.Closed);
+            _reviewer.Decide("p1", "allow"); // cleared, so nothing is sent
+            Assert.Equal(sent, Current.Sent.Count);
+        }
+
+        [Fact]
+        public void NewSessionCancelsPendingRequests()
+        {
+            ConnectWithEditRequest();
+            _bridge.OnWebviewMessage("{\"t\":\"new_session\"}");
+            var cancelled = _web.Posted.Select(JObject.Parse).Single(o => (string)o["t"] == "permission_resolved");
+            Assert.Equal("cancelled", (string)cancelled["outcome"]);
+            Assert.Equal(new[] { "p1" }, _reviewer.Closed);
+        }
+
+        [Fact]
+        public void ReconnectCancelsPendingRequests()
+        {
+            ConnectWithEditRequest();
+            _bridge.Reconnect();
+            Assert.Equal(1, _web.Posted.Count(p => p.Contains("\"cancelled\"")));
+            Assert.Equal(new[] { "p1" }, _reviewer.Closed);
+        }
+
+        [Fact]
+        public void NullReviewerAndBuffersAreTolerated()
+        {
+            var sidecars = new List<FakeSidecar>();
+            var bridge = new Bridge(() => { var s = new FakeSidecar(); sidecars.Add(s); return s; }, _web, _log, () => _workspace, null, null);
+            bridge.OnWebviewMessage("{\"t\":\"webview_ready\"}");
+            var s0 = sidecars[0];
+            s0.Emit(EditRequest);
+            bridge.OnWebviewMessage("{\"t\":\"open_diff\",\"id\":\"p1\"}");
+            s0.Emit("{\"t\":\"prepare_edit\",\"id\":\"e1\",\"path\":\"a\"}");
+            Assert.Equal("edit_prepared", (string)JObject.Parse(s0.Sent.Last())["t"]);
+            s0.Emit("{\"t\":\"permission_resolved\",\"id\":\"p1\",\"outcome\":\"allowed\"}");
+            s0.Emit(EditRequest);
+            bridge.Dispose();
         }
     }
 }

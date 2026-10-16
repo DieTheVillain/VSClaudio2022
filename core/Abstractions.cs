@@ -20,6 +20,27 @@ namespace VSClaudio.Core
         void Post(string json);
     }
 
+    /// <summary>
+    /// Shows a proposed file edit for review (the VS diff tab). Called under the bridge's lock, so implementations must not block
+    /// or marshal synchronously to another thread; marshal to the UI thread asynchronously.
+    /// </summary>
+    public interface IEditReviewer
+    {
+        void Open(string id, string path, string original, string proposed, bool isNewFile);
+        void Close(string id);
+        /// <summary>Raised with (id, "allow" | "deny") when the user decides in the review UI; may be raised on any thread.</summary>
+        event Action<string, string> Decided;
+    }
+
+    /// <summary>
+    /// Access to open editor buffers. Called under the bridge's lock only to start work: must not block; invoke
+    /// <c>done</c> on any thread when finished, including on failure.
+    /// </summary>
+    public interface IEditorBuffers
+    {
+        void SaveIfDirty(string path, Action done);
+    }
+
     public interface ILog
     {
         /// <summary>Must return immediately; never marshal synchronously to the UI thread (called under the bridge's lock from background threads).</summary>
