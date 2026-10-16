@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import type { Options, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { BLOCKED_TOOLS, READ_ONLY_DENY, readOnlyDecision, SessionController, type QueryLike } from '../src/session';
-import type { SidecarEvent } from '../../protocol/src/index';
+import { PROTOCOL_VERSION, type SidecarEvent } from '../../protocol/src/index';
 
 // A fake SDK query: records options, exposes the prompt stream, lets the test push SDK messages.
 class FakeQuery implements QueryLike {
@@ -49,7 +49,7 @@ const tick = () => new Promise((r) => setTimeout(r, 10));
 
 test('hello without claude reports claude_not_found and starts nothing', async () => {
   const { ctl, events, queries } = setup(null);
-  await ctl.handle({ t: 'hello', protocol: 1, cwd: 'C:\\w' });
+  await ctl.handle({ t: 'hello', protocol: PROTOCOL_VERSION, cwd: 'C:\\w' });
   expect(events).toEqual([{ t: 'error', code: 'claude_not_found', message: expect.stringContaining('Claude Code was not found') }]);
   expect(queries.length).toBe(0);
 });
@@ -62,8 +62,8 @@ test('hello with the wrong protocol reports protocol_mismatch', async () => {
 
 test('hello starts a read-only session with the right options', async () => {
   const { ctl, events, queries } = setup();
-  await ctl.handle({ t: 'hello', protocol: 1, cwd: 'C:\\w', resume: 'abc' });
-  expect(events).toEqual([{ t: 'ready', protocol: 1 }]);
+  await ctl.handle({ t: 'hello', protocol: PROTOCOL_VERSION, cwd: 'C:\\w', resume: 'abc' });
+  expect(events).toEqual([{ t: 'ready', protocol: PROTOCOL_VERSION }]);
   const o = queries[0].options;
   expect(o.cwd).toBe('C:\\w');
   expect(o.pathToClaudeCodeExecutable).toBe('C:\\claude.exe');
@@ -78,7 +78,7 @@ test('hello starts a read-only session with the right options', async () => {
 
 test('send pushes a human user message and SDK output is translated', async () => {
   const { ctl, events, queries } = setup();
-  await ctl.handle({ t: 'hello', protocol: 1, cwd: 'C:\\w' });
+  await ctl.handle({ t: 'hello', protocol: PROTOCOL_VERSION, cwd: 'C:\\w' });
   await ctl.handle({ t: 'send', text: 'hi 🚀' });
   await tick();
   expect(queries[0].prompts[0]).toMatchObject({ type: 'user', message: { role: 'user', content: 'hi 🚀' }, parent_tool_use_id: null, origin: { kind: 'human' } });
@@ -89,7 +89,7 @@ test('send pushes a human user message and SDK output is translated', async () =
 
 test('interrupt calls the SDK and the following error result reads as interrupted', async () => {
   const { ctl, events, queries } = setup();
-  await ctl.handle({ t: 'hello', protocol: 1, cwd: 'C:\\w' });
+  await ctl.handle({ t: 'hello', protocol: PROTOCOL_VERSION, cwd: 'C:\\w' });
   await ctl.handle({ t: 'interrupt' });
   expect(queries[0].interrupted).toBe(1);
   queries[0].push({ type: 'result', subtype: 'error_during_execution', is_error: true, duration_ms: 1, result: '' });
@@ -99,7 +99,7 @@ test('interrupt calls the SDK and the following error result reads as interrupte
 
 test('new_session closes the old query, starts a fresh one without resume, and ignores stale output', async () => {
   const { ctl, events, queries } = setup();
-  await ctl.handle({ t: 'hello', protocol: 1, cwd: 'C:\\w', resume: 'old' });
+  await ctl.handle({ t: 'hello', protocol: PROTOCOL_VERSION, cwd: 'C:\\w', resume: 'old' });
   await ctl.handle({ t: 'new_session' });
   expect(queries[0].closed).toBe(true);
   expect(queries[1].options.resume).toBeUndefined();
@@ -117,7 +117,7 @@ test('send before hello reports a fatal error', async () => {
 
 test('a query that dies with a login error reports not_logged_in and keeps the sidecar running', async () => {
   const { ctl, events, queries, exits } = setup();
-  await ctl.handle({ t: 'hello', protocol: 1, cwd: 'C:\\w' });
+  await ctl.handle({ t: 'hello', protocol: PROTOCOL_VERSION, cwd: 'C:\\w' });
   queries[0].fail(new Error('Invalid API key · Please run /login'));
   await tick();
   expect(events.at(-1)).toMatchObject({ t: 'error', code: 'not_logged_in' });
@@ -126,7 +126,7 @@ test('a query that dies with a login error reports not_logged_in and keeps the s
 
 test('a query that dies otherwise reports fatal, then exits non-zero', async () => {
   const { ctl, events, queries, exits } = setup();
-  await ctl.handle({ t: 'hello', protocol: 1, cwd: 'C:\\w' });
+  await ctl.handle({ t: 'hello', protocol: PROTOCOL_VERSION, cwd: 'C:\\w' });
   queries[0].fail(new Error('Claude Code process exited with code 1'));
   await tick();
   expect(events.at(-1)).toMatchObject({ t: 'error', code: 'fatal', message: expect.stringContaining('exited with code 1') });
@@ -136,7 +136,7 @@ test('a query that dies otherwise reports fatal, then exits non-zero', async () 
 
 test('the active query ending normally exits non-zero', async () => {
   const { ctl, queries, exits } = setup();
-  await ctl.handle({ t: 'hello', protocol: 1, cwd: 'C:\\w' });
+  await ctl.handle({ t: 'hello', protocol: PROTOCOL_VERSION, cwd: 'C:\\w' });
   queries[0].close();
   await tick();
   expect(exits).toHaveLength(1);
@@ -145,7 +145,7 @@ test('the active query ending normally exits non-zero', async () => {
 
 test('a replaced query ending or failing does not exit', async () => {
   const { ctl, queries, exits } = setup();
-  await ctl.handle({ t: 'hello', protocol: 1, cwd: 'C:\\w' });
+  await ctl.handle({ t: 'hello', protocol: PROTOCOL_VERSION, cwd: 'C:\\w' });
   await ctl.handle({ t: 'new_session' });
   queries[0].fail(new Error('late failure'));
   await tick();
@@ -163,7 +163,7 @@ test('readOnlyDecision allows read-only tools and denies everything else', () =>
 
 test('hello installs a PreToolUse hook that denies tools outside the read-only allowlist', async () => {
   const { ctl, queries } = setup();
-  await ctl.handle({ t: 'hello', protocol: 1, cwd: 'C:\\w' });
+  await ctl.handle({ t: 'hello', protocol: PROTOCOL_VERSION, cwd: 'C:\\w' });
   const matchers = queries[0].options.hooks?.PreToolUse;
   expect(matchers?.length).toBe(1);
   const hook = matchers![0].hooks[0];
@@ -178,7 +178,7 @@ test('hello installs a PreToolUse hook that denies tools outside the read-only a
 
 test('hello in an untrusted folder reports untrusted_folder and starts nothing', async () => {
   const { ctl, events, queries } = setup('C:\\claude.exe', false);
-  await ctl.handle({ t: 'hello', protocol: 1, cwd: 'C:\\w' });
+  await ctl.handle({ t: 'hello', protocol: PROTOCOL_VERSION, cwd: 'C:\\w' });
   expect(events).toEqual([{ t: 'error', code: 'untrusted_folder', message: expect.stringContaining("This folder hasn't been trusted") }]);
   expect((events[0] as any).message).toContain('C:\\w');
   expect(queries.length).toBe(0);

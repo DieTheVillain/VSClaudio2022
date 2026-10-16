@@ -3,6 +3,7 @@ import * as readline from 'node:readline';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import * as fs from 'node:fs';
+import { PROTOCOL_VERSION } from '../../protocol/src/index';
 
 const exe = path.resolve(import.meta.dir, '..', '..', 'vsix', 'sidecar', 'vsclaudio-sidecar.exe');
 const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'vsclaudio-smoke-'));
@@ -24,4 +25,4 @@ readline.createInterface({ input: child.stdout }).on('line', (raw) => {
     setTimeout(() => process.exit(ok ? 0 : 1), 500);
   }
 });
-send({ t: 'hello', protocol: 1, cwd });
+send({ t: 'hello', protocol: PROTOCOL_VERSION, cwd });
