@@ -10,12 +10,12 @@ namespace VSClaudio.Core
     /// </summary>
     public static class Protocol
     {
-        public const int Version = 1;
+        public const int Version = 2;
 
-        public static readonly string[] HostCommandTypes = { "hello", "send", "interrupt", "new_session", "shutdown" };
-        public static readonly string[] SidecarEventTypes = { "ready", "session", "block_start", "block_delta", "tool_input", "tool_result", "turn_end", "error" };
+        public static readonly string[] HostCommandTypes = { "hello", "send", "interrupt", "new_session", "shutdown", "permission_response", "set_mode", "edit_prepared" };
+        public static readonly string[] SidecarEventTypes = { "ready", "session", "block_start", "block_delta", "tool_input", "tool_result", "turn_end", "error", "permission_request", "permission_resolved", "mode", "notice", "prepare_edit" };
         public static readonly string[] HostOnlyWebviewTypes = { "status", "theme" };
-        public static readonly string[] WebviewCommandTypes = { "webview_ready", "send", "interrupt", "new_session", "reconnect", "choose_folder" };
+        public static readonly string[] WebviewCommandTypes = { "webview_ready", "send", "interrupt", "new_session", "reconnect", "choose_folder", "permission_response", "set_mode", "open_diff" };
 
         public static JObject TryParse(string json)
         {
@@ -58,6 +58,18 @@ namespace VSClaudio.Core
             if (error != null) o["error"] = error;
             return Serialize(o);
         }
+
+        public static string PermissionResponse(string id, string decision, string message = null)
+        {
+            var o = new JObject { ["t"] = "permission_response", ["id"] = id, ["decision"] = decision };
+            if (message != null) o["message"] = message;
+            return Serialize(o);
+        }
+
+        public static string PermissionResolved(string id, string outcome) =>
+            Serialize(new JObject { ["t"] = "permission_resolved", ["id"] = id, ["outcome"] = outcome });
+
+        public static string EditPrepared(string id) => Serialize(new JObject { ["t"] = "edit_prepared", ["id"] = id });
 
         private static string Serialize(JObject o) => o.ToString(Formatting.None);
     }

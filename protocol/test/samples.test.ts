@@ -5,13 +5,17 @@ import { PROTOCOL_VERSION, type HostCommand, type HostToWebview, type SidecarEve
 import { samples } from '../src/samples';
 
 // Every variant must appear in the samples so the C# cross-check sees it.
-const hostCommandKinds: Record<HostCommand['t'], true> = { hello: true, send: true, interrupt: true, new_session: true, shutdown: true };
+const hostCommandKinds: Record<HostCommand['t'], true> = {
+  hello: true, send: true, interrupt: true, new_session: true, shutdown: true, permission_response: true, set_mode: true, edit_prepared: true,
+};
 const sidecarEventKinds: Record<SidecarEvent['t'], true> = {
   ready: true, session: true, block_start: true, block_delta: true, tool_input: true, tool_result: true, turn_end: true, error: true,
+  permission_request: true, permission_resolved: true, mode: true, notice: true, prepare_edit: true,
 };
 const hostOnlyKinds: Record<Exclude<HostToWebview['t'], SidecarEvent['t']>, true> = { status: true, theme: true };
 const webviewCommandKinds: Record<WebviewCommand['t'], true> = {
   webview_ready: true, send: true, interrupt: true, new_session: true, reconnect: true, choose_folder: true,
+  permission_response: true, set_mode: true, open_diff: true,
 };
 
 const kinds = (xs: { t: string }[]) => new Set(xs.map((x) => x.t));

@@ -28,6 +28,9 @@ namespace VSClaudio.Core.Tests
                 {
                     case "hello": built = Protocol.Hello((string)sample["cwd"], (string)sample["claudePath"], (string)sample["resume"]); break;
                     case "send": built = Protocol.Send((string)sample["text"]); break;
+                    case "permission_response": built = Protocol.PermissionResponse((string)sample["id"], (string)sample["decision"], (string)sample["message"]); break;
+                    case "edit_prepared": built = Protocol.EditPrepared((string)sample["id"]); break;
+                    case "set_mode": continue; // the host forwards set_mode verbatim
                     default: built = Protocol.Simple((string)sample["t"]); break;
                 }
                 Assert.True(JToken.DeepEquals(sample, JObject.Parse(built)), $"expected {sample.ToString(Newtonsoft.Json.Formatting.None)} got {built}");
@@ -53,6 +56,15 @@ namespace VSClaudio.Core.Tests
             Assert.Equal("turn_end", (string)built["t"]);
             Assert.Equal("interrupted", (string)built["status"]);
             Assert.Equal("Session disconnected", (string)built["error"]);
+        }
+
+        [Fact]
+        public void PermissionResolvedBuilderMatchesShape()
+        {
+            var built = JObject.Parse(Protocol.PermissionResolved("perm_1", "cancelled"));
+            Assert.Equal("permission_resolved", (string)built["t"]);
+            Assert.Equal("perm_1", (string)built["id"]);
+            Assert.Equal("cancelled", (string)built["outcome"]);
         }
 
         [Fact]
