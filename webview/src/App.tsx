@@ -52,7 +52,7 @@ export function App({ host }: { host: HostApi }) {
       {ready && state.items.length === 0 ? (
         <div className="empty">
           <ClaudeMark size={32} />
-          <p>Ask Claude about this solution. It can read and search your code; editing comes in a later version.</p>
+          <p>Ask Claude about this solution. It can read your code, propose edits for you to review, and run commands with your permission.</p>
         </div>
       ) : (
         <MessageList
