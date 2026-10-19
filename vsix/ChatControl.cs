@@ -62,7 +62,7 @@ namespace VSClaudio
 
             var extensionDir = Path.GetDirectoryName(typeof(ChatControl).Assembly.Location);
             var sidecarExe = Path.Combine(extensionDir, "sidecar", "vsclaudio-sidecar.exe");
-            _bridge = new Bridge(() => new SidecarProcess(sidecarExe, "", _log), this, _log, () => _folderOverride ?? _workspace, null, null);
+            _bridge = new Bridge(() => new SidecarProcess(sidecarExe, "", _log), this, _log, () => _folderOverride ?? _workspace, new EditReviewer(_log), new EditorBuffers(_log));
             _bridge.ChooseFolderRequested += ChooseFolder;
             _log.Info($"Sidecar: {sidecarExe}; workspace: {_workspace ?? "(none)"}");
 
