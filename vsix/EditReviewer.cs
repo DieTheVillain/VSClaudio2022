@@ -162,9 +162,16 @@ namespace VSClaudio
             }
         }
 
-        private void DeleteTempFolder(string id)
+        private void DeleteTempFolder(string id) => DeleteFolder(TempFolder(id));
+
+        private void DeleteFolder(string folder)
         {
-            var folder = TempFolder(id);
+            // A recursive delete must never reach the diffs root or anything outside it.
+            if (!DiffPaths.IsStrictlyUnder(DiffsRoot(), folder))
+            {
+                _log.Info($"Refused to delete {folder}: it is not inside {DiffsRoot()}.");
+                return;
+            }
             if (!Directory.Exists(folder)) return;
             foreach (var file in Directory.GetFiles(folder)) File.SetAttributes(file, FileAttributes.Normal);
             Directory.Delete(folder, true);
@@ -176,15 +183,24 @@ namespace VSClaudio
             if (_swept) return;
             _swept = true;
             var root = DiffsRoot();
-            if (!Directory.Exists(root)) return;
+            string[] dirs;
+            try
+            {
+                if (!Directory.Exists(root)) return;
+                dirs = Directory.GetDirectories(root);
+            }
+            catch (Exception ex)
+            {
+                _log.Info($"Could not list old diff folders in {root}: {ex.Message}");
+                return;
+            }
             var cutoff = DateTime.UtcNow.AddDays(-1);
-            foreach (var dir in Directory.GetDirectories(root))
+            foreach (var dir in dirs)
             {
                 try
                 {
                     if (Directory.GetLastWriteTimeUtc(dir) >= cutoff) continue;
-                    foreach (var file in Directory.GetFiles(dir)) File.SetAttributes(file, FileAttributes.Normal);
-                    Directory.Delete(dir, true);
+                    DeleteFolder(dir);
                 }
                 catch (Exception ex)
                 {
@@ -195,13 +211,7 @@ namespace VSClaudio
 
         private static string DiffsRoot() => Path.Combine(Path.GetTempPath(), "VSClaudio", "diffs");
 
-        private static string TempFolder(string id)
-        {
-            var safe = id ?? "";
-            foreach (var c in Path.GetInvalidFileNameChars()) safe = safe.Replace(c, '_');
-            if (safe.Trim('.').Length == 0) safe = "_";
-            return Path.Combine(DiffsRoot(), safe);
-        }
+        private static string TempFolder(string id) => DiffPaths.FolderFor(DiffsRoot(), id);
 
         private sealed class InfoBarEvents : IVsInfoBarUIEvents
         {
