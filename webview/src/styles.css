@@ -55,6 +55,7 @@ body { background: var(--vsc-bg); color: var(--vsc-fg); font: 13px/1.5 var(--fon
 .tl-dot-running { animation: pulse 1s ease-in-out infinite; }
 .tl-dot-ok { background: var(--vsc-ok); }
 .tl-dot-error { background: var(--vsc-error); }
+.tl-dot-pending { background: var(--claude-accent); }
 .tl-body { min-width: 0; }
 .status-line { padding: 0 14px 10px; color: var(--vsc-muted); }
 .empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 12px 24px; color: var(--vsc-muted); text-align: center; }
@@ -144,3 +145,42 @@ body { background: var(--vsc-bg); color: var(--vsc-fg); font: 13px/1.5 var(--fon
 .mode-item { text-align: left; border: 0; border-radius: 4px; background: transparent; color: var(--vsc-fg); font: inherit; font-size: 12px; padding: 4px 8px; cursor: pointer; }
 .mode-item:hover { background: var(--vsc-input-bg); }
 .mode-item[aria-checked="true"] { color: var(--claude-accent); }
+
+/* Inline diff (auto-applied edits) */
+.tool-stats { margin-left: 8px; color: var(--vsc-muted); font-family: var(--mono); font-size: 11px; }
+.diff { font: 12px var(--mono); max-height: 300px; overflow: auto; }
+.diff-line { display: flex; white-space: pre-wrap; word-break: break-word; padding: 0 8px; }
+.diff-mark { flex: none; width: 1.5ch; color: var(--vsc-muted); user-select: none; }
+.diff-add { background: color-mix(in srgb, var(--vsc-ok) 18%, transparent); }
+.diff-del { background: color-mix(in srgb, var(--vsc-error) 18%, transparent); }
+
+/* Permission, plan and question cards */
+.perm-card { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 8px 10px; border: 1px solid var(--vsc-border); border-radius: 6px; background: var(--vsc-raised); min-width: 0; }
+.perm-card .md, .perm-card p { align-self: stretch; margin: 0; }
+.perm-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.perm-title { font-weight: 600; }
+.perm-path, .perm-detail { color: var(--vsc-link); font: 12px var(--mono); overflow-wrap: anywhere; }
+.perm-stats { color: var(--vsc-muted); font: 11px var(--mono); }
+.perm-input { align-self: stretch; margin: 0; padding: 6px 8px; font: 12px var(--mono); white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow: auto; border: 1px solid var(--vsc-border); border-radius: 4px; }
+.perm-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.perm-actions-col { flex-direction: column; align-items: stretch; align-self: stretch; }
+.link-btn { background: none; border: 0; padding: 0; font: inherit; font-size: 12px; color: var(--vsc-link); cursor: pointer; }
+.link-btn:hover:not(:disabled) { text-decoration: underline; }
+.link-btn:disabled { color: var(--vsc-muted); cursor: default; }
+.card-btn { font: inherit; text-align: left; color: var(--vsc-fg); background: transparent; border: 1px solid var(--vsc-input-border); border-radius: 4px; padding: 3px 10px; cursor: pointer; }
+.card-btn:hover:not(:disabled) { border-color: var(--claude-accent); }
+.card-btn-primary { color: #fff; background: var(--claude-accent); border-color: var(--claude-accent); }
+.card-btn:disabled, .perm-card select:disabled { opacity: 0.5; cursor: default; }
+.card-note { display: flex; gap: 6px; align-self: stretch; }
+.card-note input, .perm-other, .perm-card select { font: inherit; color: var(--vsc-fg); background: var(--vsc-input-bg); border: 1px solid var(--vsc-input-border); border-radius: 4px; padding: 3px 8px; }
+.card-note input { flex: 1; min-width: 0; }
+.card-note input:focus, .perm-other:focus { outline: 0; border-color: var(--claude-accent); }
+.card-status { align-self: flex-start; }
+.perm-mode { display: flex; align-items: center; gap: 8px; }
+.perm-question { align-self: stretch; margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.perm-question legend { padding: 0; margin-bottom: 4px; }
+.chip { display: inline-block; font-size: 11px; padding: 0 6px; border: 1px solid var(--vsc-border); border-radius: 8px; color: var(--vsc-muted); }
+.perm-option { display: flex; align-items: flex-start; gap: 6px; cursor: pointer; }
+.perm-option input { margin-top: 4px; accent-color: var(--claude-accent); }
+.perm-option-desc { display: block; }
+.perm-other { align-self: stretch; }

@@ -55,7 +55,12 @@ export function App({ host }: { host: HostApi }) {
           <p>Ask Claude about this solution. It can read and search your code; editing comes in a later version.</p>
         </div>
       ) : (
-        <MessageList items={state.items} running={state.running} />
+        <MessageList
+          items={state.items}
+          running={state.running}
+          respond={(r) => host.post({ t: 'permission_response', ...r })}
+          onOpenDiff={(id) => host.post({ t: 'open_diff', id })}
+        />
       )}
       {state.setup && <SetupCard code={state.setup.code} message={state.setup.message} onRetry={() => host.post({ t: 'reconnect' })} />}
       {!state.setup && state.connection === 'disconnected' && (

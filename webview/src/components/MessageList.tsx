@@ -1,6 +1,11 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import type { Item } from '../state';
+import { EditCard } from './EditCard';
 import { Markdown } from './Markdown';
+import { PermissionCard } from './PermissionCard';
+import { PlanCard } from './PlanCard';
+import { QuestionCard } from './QuestionCard';
+import type { Respond } from './cardParts';
 import { Thinking } from './Thinking';
 import { ToolCard } from './ToolCard';
 
@@ -29,12 +34,15 @@ function Timestamp({ at }: { at?: number }) {
 }
 
 function dotClass(item: ReplyItem): string {
+  if (item.kind === 'permission') return item.outcome === undefined ? 'tl-dot-pending' : 'tl-dot-muted';
   if (item.kind === 'tool') return `tl-dot-${item.status}`;
   if (item.kind === 'notice' && item.level === 'error') return 'tl-dot-error';
   return 'tl-dot-muted';
 }
 
-function renderReply(item: ReplyItem): ReactNode {
+type CardHandlers = { respond: Respond; onOpenDiff: (id: string) => void };
+
+function renderReply(item: ReplyItem, h: CardHandlers): ReactNode {
   switch (item.kind) {
     case 'text':
       return <Markdown text={item.text} />;
@@ -45,12 +53,22 @@ function renderReply(item: ReplyItem): ReactNode {
     case 'notice':
       return <div className={`notice notice-${item.level}`}>{item.text}</div>;
     case 'permission':
-      // Rendered by the permission card.
-      return null;
+      switch (item.request.kind) {
+        case 'edit':
+          return <EditCard item={item} respond={h.respond} onOpenDiff={h.onOpenDiff} />;
+        case 'plan':
+          return <PlanCard item={item} respond={h.respond} />;
+        case 'question':
+          return <QuestionCard item={item} respond={h.respond} />;
+        default:
+          return <PermissionCard item={item} respond={h.respond} />;
+      }
   }
 }
 
-export function MessageList({ items, running }: { items: Item[]; running: boolean }) {
+const noop = () => {};
+
+export function MessageList({ items, running, respond = noop, onOpenDiff = noop }: { items: Item[]; running: boolean; respond?: Respond; onOpenDiff?: (id: string) => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
 
@@ -85,7 +103,7 @@ export function MessageList({ items, running }: { items: Item[]; running: boolea
               {group.items.map((item) => (
                 <div key={item.id} className={`tl-row tl-${item.kind}`}>
                   <span className={`tl-dot ${dotClass(item)}`} aria-hidden="true" />
-                  <div className="tl-body">{renderReply(item)}</div>
+                  <div className="tl-body">{renderReply(item, { respond, onOpenDiff })}</div>
                 </div>
               ))}
             </div>

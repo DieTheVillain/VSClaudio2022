@@ -12,6 +12,11 @@ import { Thinking, thinkingLabel } from './components/Thinking';
 import { ToolCard } from './components/ToolCard';
 import type { Item } from './state';
 import { resultPreview, toolSummary } from './toolSummary';
+import { EditCard } from './components/EditCard';
+import { PermissionCard } from './components/PermissionCard';
+import { PlanCard } from './components/PlanCard';
+import { QuestionCard, buildAnswers } from './components/QuestionCard';
+import type { PermissionItem } from './state';
 
 function fakeHost() {
   const posted: WebviewCommand[] = [];
@@ -302,5 +307,177 @@ describe('ModeChip', () => {
   test('mode chip defaults to Ask before edits', () => {
     render(<ModeChip disabled={false} onChange={() => {}} />);
     expect(screen.getByRole('button', { name: /Ask before edits/ })).toBeInTheDocument();
+  });
+});
+
+type Req = PermissionItem['request'];
+const perm = (request: Partial<Req> & Pick<Req, 'kind'>, outcome?: PermissionItem['outcome']): PermissionItem => ({
+  kind: 'permission', id: 'p1', outcome,
+  request: { t: 'permission_request', id: 'p1', toolName: 'Edit', input: {}, ...request } as Req,
+});
+const editItem = (outcome?: PermissionItem['outcome'], extra: Partial<Req> = {}) =>
+  perm({ kind: 'edit', path: 'C:\\src\\a.cs', original: 'one\ntwo\n', proposed: 'one\nTWO\nthree\n', ...extra }, outcome);
+
+describe('permission cards', () => {
+  test('edit card shows path and +/- counts and posts allow on Accept', async () => {
+    const respond = vi.fn();
+    render(<EditCard item={editItem()} respond={respond} onOpenDiff={() => {}} />);
+    expect(screen.getByText('C:\\src\\a.cs')).toBeInTheDocument();
+    expect(screen.getByText('+2 \u22121')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Accept' }));
+    expect(respond).toHaveBeenCalledWith({ id: 'p1', decision: 'allow' });
+  });
+
+  test('edit card shows too large instead of counts and hides Open diff', () => {
+    render(<EditCard item={editItem(undefined, { tooLarge: true })} respond={() => {}} onOpenDiff={() => {}} />);
+    expect(screen.getByText('too large to preview')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open diff' })).toBeNull();
+  });
+
+  test('edit card Reject with note posts deny with message', async () => {
+    const respond = vi.fn();
+    render(<EditCard item={editItem()} respond={respond} onOpenDiff={() => {}} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Reject' }));
+    await userEvent.type(screen.getByRole('textbox'), 'use a constant');
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(respond).toHaveBeenCalledWith({ id: 'p1', decision: 'deny', message: 'use a constant' });
+  });
+
+  test('edit card Open diff posts open_diff', async () => {
+    const open = vi.fn();
+    render(<EditCard item={editItem()} respond={() => {}} onOpenDiff={open} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Open diff' }));
+    expect(open).toHaveBeenCalledWith('p1');
+  });
+
+  test('permission card offers suggestion buttons and posts allow_always with index', async () => {
+    const respond = vi.fn();
+    const item = perm({ kind: 'tool', toolName: 'Bash', input: { command: 'dotnet test' }, suggestions: [{ label: 'dotnet test', index: 0 }, { label: 'Bash', index: 3 }] });
+    render(<PermissionCard item={item} respond={respond} />);
+    expect(screen.getByText('Allow Bash?')).toBeInTheDocument();
+    expect(screen.getByText('dotnet test')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: "Yes, don't ask again for Bash" }));
+    expect(respond).toHaveBeenCalledWith({ id: 'p1', decision: 'allow_always', suggestionIndex: 3 });
+    await userEvent.click(screen.getByRole('button', { name: 'Yes' }));
+    expect(respond).toHaveBeenLastCalledWith({ id: 'p1', decision: 'allow' });
+  });
+
+  test('permission card No sends a deny note', async () => {
+    const respond = vi.fn();
+    render(<PermissionCard item={perm({ kind: 'tool', toolName: 'Bash', input: { command: 'ls' } })} respond={respond} />);
+    await userEvent.click(screen.getByRole('button', { name: 'No' }));
+    await userEvent.type(screen.getByPlaceholderText('Tell Claude what to do instead'), 'skip it');
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(respond).toHaveBeenCalledWith({ id: 'p1', decision: 'deny', message: 'skip it' });
+  });
+
+  test('plan card approves with the chosen next mode', async () => {
+    const respond = vi.fn();
+    render(<PlanCard item={perm({ kind: 'plan', toolName: 'ExitPlanMode', plan: '1. Do it' })} respond={respond} />);
+    const select = screen.getByRole('combobox') as HTMLSelectElement;
+    expect(select.value).toBe('default');
+    expect(Array.from(select.options).map((o) => o.textContent)).toEqual(['Ask before edits', 'Edit automatically', 'Auto']);
+    await userEvent.selectOptions(select, 'acceptEdits');
+    await userEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    expect(respond).toHaveBeenCalledWith({ id: 'p1', decision: 'allow', nextMode: 'acceptEdits' });
+  });
+
+  test('plan card without text and Keep planning note', async () => {
+    const respond = vi.fn();
+    render(<PlanCard item={perm({ kind: 'plan', toolName: 'ExitPlanMode' })} respond={respond} />);
+    expect(screen.getByText('Claude has finished planning.')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Keep planning' }));
+    await userEvent.type(screen.getByRole('textbox'), 'more detail');
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(respond).toHaveBeenCalledWith({ id: 'p1', decision: 'deny', message: 'more detail' });
+  });
+
+  const questions = [
+    { question: 'Which database?', header: 'Database', multiSelect: false, options: [{ label: 'SQLite', description: 'Embedded' }, { label: 'Postgres' }] },
+    { question: 'Which extras?', header: 'Extras', multiSelect: true, options: [{ label: 'Logging' }, { label: 'Metrics' }] },
+  ];
+
+  test('question card: multi-select joined, Other overrides', async () => {
+    expect(buildAnswers(questions, { 0: ['SQLite'], 1: ['Logging', 'Metrics'] }, {})).toEqual({ 'Which database?': 'SQLite', 'Which extras?': 'Logging, Metrics' });
+    expect(buildAnswers(questions, { 0: ['SQLite'], 1: ['Logging'] }, { 0: 'DuckDB', 1: '   ' })).toEqual({ 'Which database?': 'DuckDB', 'Which extras?': 'Logging' });
+
+    const respond = vi.fn();
+    render(<QuestionCard item={perm({ kind: 'question', toolName: 'AskUserQuestion', questions })} respond={respond} />);
+    const submit = screen.getByRole('button', { name: 'Submit' });
+    expect(submit).toBeDisabled();
+    expect(screen.getByText('Embedded')).toBeInTheDocument();
+    await userEvent.click(screen.getByLabelText(/SQLite/));
+    expect(submit).toBeDisabled();
+    await userEvent.click(screen.getByLabelText(/Logging/));
+    await userEvent.click(screen.getByLabelText(/Metrics/));
+    expect(submit).toBeEnabled();
+    await userEvent.click(submit);
+    expect(respond).toHaveBeenCalledWith({ id: 'p1', decision: 'allow', answers: { 'Which database?': 'SQLite', 'Which extras?': 'Logging, Metrics' } });
+  });
+
+  test('resolved cards show their outcome and disable controls', () => {
+    const r1 = render(<EditCard item={editItem('allowed')} respond={() => {}} onOpenDiff={() => {}} />);
+    expect(screen.getByText('Accepted')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Accept' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Reject' })).toBeDisabled();
+    r1.unmount();
+    const r2 = render(<EditCard item={editItem('denied')} respond={() => {}} onOpenDiff={() => {}} />);
+    expect(screen.getByText('Rejected')).toBeInTheDocument();
+    r2.unmount();
+    const r3 = render(<PermissionCard item={perm({ kind: 'tool', toolName: 'Bash', input: {}, suggestions: [{ label: 'x', index: 0 }] }, 'allowed')} respond={() => {}} />);
+    expect(screen.getByText('Allowed')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Yes' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: "Yes, don't ask again for x" })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'No' })).toBeDisabled();
+    r3.unmount();
+    const r4 = render(<PermissionCard item={perm({ kind: 'tool', toolName: 'Bash', input: {} }, 'denied')} respond={() => {}} />);
+    expect(screen.getByText('Denied')).toBeInTheDocument();
+    r4.unmount();
+    const r5 = render(<PlanCard item={perm({ kind: 'plan', toolName: 'ExitPlanMode', plan: 'p' }, 'cancelled')} respond={() => {}} />);
+    expect(screen.getByText('Cancelled')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled();
+    expect(screen.getByRole('combobox')).toBeDisabled();
+    r5.unmount();
+    render(<QuestionCard item={perm({ kind: 'question', toolName: 'AskUserQuestion', questions }, 'allowed')} respond={() => {}} />);
+    expect(screen.getByText('Allowed')).toBeInTheDocument();
+    expect(screen.getByLabelText(/SQLite/)).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Submit' })).toBeDisabled();
+  });
+
+  test('mode change keeps pending requests pending', async () => {
+    const { host, push } = fakeHost();
+    render(<App host={host} />);
+    await push({ t: 'status', state: 'connected' });
+    await push({ t: 'permission_request', id: 'e1', kind: 'edit', toolName: 'Edit', input: {}, path: 'a.cs', original: 'a', proposed: 'b' });
+    await push({ t: 'mode', mode: 'acceptEdits' });
+    expect(screen.getByRole('button', { name: 'Accept' })).toBeEnabled();
+    expect(screen.queryByText('Accepted')).toBeNull();
+  });
+
+  test('App posts permission_response and open_diff', async () => {
+    const { host, posted, push } = fakeHost();
+    render(<App host={host} />);
+    await push({ t: 'status', state: 'connected' });
+    await push({ t: 'permission_request', id: 'e1', kind: 'edit', toolName: 'Edit', input: {}, path: 'a.cs', original: 'a', proposed: 'b' });
+    await userEvent.click(screen.getByRole('button', { name: 'Open diff' }));
+    expect(posted).toContainEqual({ t: 'open_diff', id: 'e1' });
+    await userEvent.click(screen.getByRole('button', { name: 'Accept' }));
+    expect(posted).toContainEqual({ t: 'permission_response', id: 'e1', decision: 'allow' });
+  });
+
+  test('auto-applied Edit row expands to an inline diff', async () => {
+    const item: Item = { kind: 'tool', id: 't', toolUseId: 'tu', name: 'Edit', status: 'ok', input: { file_path: 'a.cs', old_string: 'one\ntwo', new_string: 'one\nTWO\nthree' }, result: 'ok' };
+    render(<ToolCard item={item} />);
+    expect(screen.getByText('+2 \u22121')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { expanded: false }));
+    expect(screen.getByText('TWO')).toBeInTheDocument();
+    expect(screen.getByText('two')).toBeInTheDocument();
+    expect(screen.queryByText('IN')).toBeNull();
+  });
+
+  test('auto-applied Write row diffs against empty', () => {
+    const item: Item = { kind: 'tool', id: 't', toolUseId: 'tu', name: 'Write', status: 'ok', input: { file_path: 'n.cs', content: 'a\nb' } };
+    render(<ToolCard item={item} />);
+    expect(screen.getByText('+2 \u22120')).toBeInTheDocument();
   });
 });
