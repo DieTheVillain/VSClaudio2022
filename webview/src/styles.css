@@ -115,7 +115,7 @@ body { background: var(--vsc-bg); color: var(--vsc-fg); font: 13px/1.5 var(--fon
 .composer:focus-within { border-color: var(--claude-accent); }
 .composer textarea { display: block; width: 100%; resize: none; border: 0; outline: 0; background: transparent; color: var(--vsc-fg); font: inherit; padding: 8px 10px 0; max-height: 200px; }
 .composer textarea:disabled { opacity: 0.6; }
-.composer-bar { display: flex; align-items: center; justify-content: flex-end; padding: 4px 6px 6px 10px; }
+.composer-bar { display: flex; align-items: center; justify-content: space-between; padding: 4px 6px 6px 10px; }
 .square-btn { width: 28px; height: 28px; border-radius: 6px; border: 0; cursor: pointer; color: #fff; background: var(--claude-accent); font-size: 14px; line-height: 1; }
 .square-btn:disabled { opacity: 0.4; cursor: default; }
 .square-btn.stop { background: var(--vsc-fg); color: var(--vsc-bg); font-size: 10px; }
@@ -135,3 +135,12 @@ body { background: var(--vsc-bg); color: var(--vsc-fg); font: 13px/1.5 var(--fon
 :root[data-theme='light'] .hljs-title, :root[data-theme='light'] .hljs-title.function_ { color: #795e26; }
 :root[data-theme='light'] .hljs-type, :root[data-theme='light'] .hljs-title.class_ { color: #267f99; }
 :root[data-theme='light'] .hljs-attr, :root[data-theme='light'] .hljs-variable, :root[data-theme='light'] .hljs-params { color: #001080; }
+
+.mode-chip { position: relative; }
+.mode-chip-btn { border: 1px solid var(--vsc-input-border); border-radius: 10px; background: transparent; color: var(--vsc-fg); font: inherit; font-size: 11px; padding: 2px 8px; cursor: pointer; }
+.mode-chip-btn:hover:not(:disabled) { border-color: var(--claude-accent); }
+.mode-chip-btn:disabled { opacity: 0.5; cursor: default; }
+.mode-menu { position: absolute; bottom: calc(100% + 4px); left: 0; min-width: 160px; display: flex; flex-direction: column; padding: 4px; border: 1px solid var(--vsc-input-border); border-radius: 6px; background: var(--vsc-bg); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); z-index: 10; }
+.mode-item { text-align: left; border: 0; border-radius: 4px; background: transparent; color: var(--vsc-fg); font: inherit; font-size: 12px; padding: 4px 8px; cursor: pointer; }
+.mode-item:hover { background: var(--vsc-input-bg); }
+.mode-item[aria-checked="true"] { color: var(--claude-accent); }

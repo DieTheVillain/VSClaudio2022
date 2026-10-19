@@ -193,3 +193,53 @@ describe('reducer', () => {
     expect(run([host({ t: 'block_delta', key: 'nope', text: 'x' })]).items).toEqual([]);
   });
 });
+
+describe('reducer permissions and mode', () => {
+  const request: HostToWebview = { t: 'permission_request', id: 'p1', kind: 'edit', toolName: 'Edit', input: {}, path: 'a.cs' };
+
+  test('permission_request appends a pending permission item', () => {
+    const s = run([send('hi', 1), host(request, 5)]);
+    const item = s.items.at(-1)!;
+    expect(item).toMatchObject({ kind: 'permission', id: 'p1', at: 5 });
+    expect((item as { outcome?: string }).outcome).toBeUndefined();
+  });
+
+  test('permission_resolved sets the outcome', () => {
+    const s = run([host(request), host({ t: 'permission_resolved', id: 'p1', outcome: 'allowed' })]);
+    expect(s.items[0]).toMatchObject({ kind: 'permission', outcome: 'allowed' });
+  });
+
+  test('mode event sets the mode', () => {
+    expect(run([host({ t: 'mode', mode: 'plan' })]).mode).toBe('plan');
+  });
+
+  test('notice does not stop a running turn', () => {
+    const s = run([send('hi'), host({ t: 'notice', level: 'error', text: 'careful' })]);
+    expect(s.running).toBe(true);
+    expect(s.items.at(-1)).toMatchObject({ kind: 'notice', level: 'error', text: 'careful' });
+  });
+
+  test('turn_end cancels unresolved permission items', () => {
+    const resolved: HostToWebview = { ...request, id: 'p2' };
+    const s = run([
+      send('hi'), host(request), host(resolved), host({ t: 'permission_resolved', id: 'p2', outcome: 'denied' }),
+      host({ t: 'turn_end', status: 'success' }),
+    ]);
+    const outcomes = s.items.filter((i) => i.kind === 'permission').map((i) => (i as { outcome?: string }).outcome);
+    expect(outcomes).toEqual(['cancelled', 'denied']);
+  });
+
+  test('fatal error, workspace change and clear cancel pending requests', () => {
+    const fatal = run([host(request), host({ t: 'error', code: 'fatal', message: 'boom' })]);
+    expect(fatal.items[0]).toMatchObject({ kind: 'permission', outcome: 'cancelled' });
+    const cleared = run([host(request), { type: 'clear' }]);
+    expect(cleared.items).toEqual([]);
+    const ws = run([host(request), host({ t: 'status', state: 'connected', detail: 'workspace_changed' })]);
+    expect(ws.items).toEqual([]);
+  });
+
+  test('prepare_edit is ignored', () => {
+    const s = run([host({ t: 'prepare_edit', id: 'x', path: 'a' })]);
+    expect(s).toEqual(initialState);
+  });
+});

@@ -1,13 +1,17 @@
 import { useState } from 'react';
+import type { PermissionMode } from '../../../protocol/src/index';
+import { ModeChip } from './ModeChip';
 
 interface Props {
   running: boolean;
   disabled: boolean;
   onSend: (text: string) => void;
   onStop: () => void;
+  mode?: PermissionMode;
+  onModeChange?: (m: PermissionMode) => void;
 }
 
-export function Composer({ running, disabled, onSend, onStop }: Props) {
+export function Composer({ running, disabled, onSend, onStop, mode, onModeChange }: Props) {
   const [text, setText] = useState('');
   const submit = () => {
     if (running || disabled || !text.trim()) return;
@@ -34,6 +38,7 @@ export function Composer({ running, disabled, onSend, onStop }: Props) {
         }}
       />
       <div className="composer-bar">
+        <ModeChip mode={mode} disabled={disabled} onChange={(m) => onModeChange?.(m)} />
         {running ? (
           <button className="square-btn stop" onClick={onStop} aria-label="Stop" title="Stop (Esc)">■</button>
         ) : (

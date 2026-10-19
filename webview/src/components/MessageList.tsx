@@ -44,6 +44,9 @@ function renderReply(item: ReplyItem): ReactNode {
       return <ToolCard item={item} />;
     case 'notice':
       return <div className={`notice notice-${item.level}`}>{item.text}</div>;
+    case 'permission':
+      // Rendered by the permission card.
+      return null;
   }
 }
 

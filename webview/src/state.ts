@@ -1,6 +1,14 @@
-import type { ConnectionState, HostToWebview } from '../../protocol/src/index';
+import type { ConnectionState, HostToWebview, PermissionMode, PermissionOutcome, SidecarEvent } from '../../protocol/src/index';
 
 export type ToolStatus = 'running' | 'ok' | 'error';
+
+export type PermissionItem = {
+  kind: 'permission';
+  id: string;
+  request: Extract<SidecarEvent, { t: 'permission_request' }>;
+  outcome?: PermissionOutcome;
+  at?: number;
+};
 
 // `at` (ms since epoch) is set on user messages and on the first item of each reply.
 export type Item = { at?: number } & (
@@ -9,7 +17,7 @@ export type Item = { at?: number } & (
   | { kind: 'thinking'; id: string; text: string; startedAt?: number; endedAt?: number }
   | { kind: 'tool'; id: string; toolUseId: string; name: string; input?: unknown; result?: string; truncated?: boolean; status: ToolStatus }
   | { kind: 'notice'; id: string; level: 'info' | 'error'; text: string }
-);
+) | PermissionItem;
 
 export interface ChatState {
   connection: ConnectionState;
@@ -17,6 +25,7 @@ export interface ChatState {
   setup?: { code: string; message: string };
   sessionId?: string;
   model?: string;
+  mode?: PermissionMode;
   running: boolean;
   items: Item[];
   theme: Record<string, string>;
@@ -46,6 +55,12 @@ function closeThinking(s: ChatState, at: number): ChatState {
   return { ...s, items: s.items.map((i) => (i.kind === 'thinking' && i.endedAt === undefined ? { ...i, endedAt: at } : i)) };
 }
 
+// A turn that ends (or a session that goes away) can no longer be answered, so open requests are cancelled.
+function cancelPending(s: ChatState): ChatState {
+  if (!s.items.some((i) => i.kind === 'permission' && i.outcome === undefined)) return s;
+  return { ...s, items: s.items.map((i) => (i.kind === 'permission' && i.outcome === undefined ? { ...i, outcome: 'cancelled' as const } : i)) };
+}
+
 function updateTool(s: ChatState, toolUseId: string, name: string, patch: Partial<ToolItem>, at: number): ChatState {
   const idx = s.items.findIndex((i) => i.kind === 'tool' && i.toolUseId === toolUseId);
   if (idx === -1) {
@@ -61,7 +76,7 @@ function onHost(s: ChatState, msg: HostToWebview, at: number): ChatState {
     case 'status': {
       const next = { ...s, connection: msg.state, connectionDetail: msg.detail, setup: msg.state === 'connected' ? undefined : s.setup };
       // The host restarted the session in a different folder; the old transcript no longer applies.
-      return msg.detail === 'workspace_changed' ? { ...next, items: [], running: false, sessionId: undefined } : next;
+      return msg.detail === 'workspace_changed' ? { ...cancelPending(next), items: [], running: false, sessionId: undefined } : next;
     }
     case 'theme':
       return { ...s, theme: msg.vars };
@@ -91,7 +106,7 @@ function onHost(s: ChatState, msg: HostToWebview, at: number): ChatState {
     case 'tool_result':
       return updateTool(s, msg.toolUseId, 'Tool', { result: msg.content, truncated: msg.truncated, status: msg.isError ? 'error' : 'ok' }, at);
     case 'turn_end': {
-      let next: ChatState = { ...closeThinking(s, at), running: false };
+      let next: ChatState = { ...cancelPending(closeThinking(s, at)), running: false };
       if (msg.status === 'success') return next;
       if (msg.status === 'interrupted') {
         next = {
@@ -103,8 +118,19 @@ function onHost(s: ChatState, msg: HostToWebview, at: number): ChatState {
       return withLocal(next, at, (id) => ({ kind: 'notice', id, level: 'error', text: msg.error ?? 'Something went wrong.' }));
     }
     case 'error':
-      if (msg.code === 'fatal') return withLocal({ ...closeThinking(s, at), running: false }, at, (id) => ({ kind: 'notice', id, level: 'error', text: msg.message }));
+      if (msg.code === 'fatal') return withLocal({ ...cancelPending(closeThinking(s, at)), running: false }, at, (id) => ({ kind: 'notice', id, level: 'error', text: msg.message }));
       return { ...s, running: false, setup: { code: msg.code, message: msg.message } };
+    case 'permission_request':
+      return append(s, { kind: 'permission', id: msg.id, request: msg }, at);
+    case 'permission_resolved':
+      return { ...s, items: s.items.map((i) => (i.kind === 'permission' && i.id === msg.id ? { ...i, outcome: msg.outcome } : i)) };
+    case 'mode':
+      return { ...s, mode: msg.mode };
+    case 'notice':
+      return withLocal(s, at, (id) => ({ kind: 'notice', id, level: msg.level, text: msg.text }));
+    default:
+      // prepare_edit is host-internal and never rendered.
+      return s;
   }
 }
 
@@ -116,6 +142,6 @@ export function reducer(s: ChatState, a: Action): ChatState {
       if (s.running || !a.text.trim()) return s;
       return { ...withLocal(s, a.at, (id) => ({ kind: 'user', id, text: a.text, at: a.at })), running: true };
     case 'clear':
-      return { ...s, items: [], running: false, sessionId: undefined };
+      return { ...cancelPending(s), items: [], running: false, sessionId: undefined };
   }
 }

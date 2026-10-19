@@ -63,7 +63,14 @@ export function App({ host }: { host: HostApi }) {
       )}
       {state.connection === 'no_workspace' && <NoWorkspace onChoose={() => host.post({ t: 'choose_folder' })} />}
       {state.connection === 'starting' && !state.setup && <div className="muted status-line">Starting Claude…</div>}
-      <Composer running={state.running} disabled={!ready} onSend={send} onStop={() => host.post({ t: 'interrupt' })} />
+      <Composer
+        running={state.running}
+        disabled={!ready}
+        onSend={send}
+        onStop={() => host.post({ t: 'interrupt' })}
+        mode={state.mode}
+        onModeChange={(mode) => host.post({ t: 'set_mode', mode })}
+      />
     </div>
   );
 }

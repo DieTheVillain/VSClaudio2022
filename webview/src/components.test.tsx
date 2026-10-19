@@ -5,6 +5,7 @@ import type { HostToWebview, WebviewCommand } from '../../protocol/src/index';
 import { App } from './App';
 import type { HostApi } from './host';
 import { Composer } from './components/Composer';
+import { ModeChip } from './components/ModeChip';
 import { Markdown } from './components/Markdown';
 import { MessageList } from './components/MessageList';
 import { Thinking, thinkingLabel } from './components/Thinking';
@@ -278,5 +279,28 @@ describe('App', () => {
     push({ t: 'theme', vars: { '--vsc-bg': '#F5F5F5' } });
     expect(document.documentElement.style.getPropertyValue('--vsc-bg')).toBe('#F5F5F5');
     expect(document.documentElement.dataset.theme).toBe('light');
+  });
+});
+
+describe('ModeChip', () => {
+  test('mode chip shows the current mode and posts set_mode on choice', async () => {
+    const { host, posted, push } = fakeHost();
+    render(<App host={host} />);
+    await push({ t: 'status', state: 'connected' });
+    await push({ t: 'mode', mode: 'plan' });
+    const chip = screen.getByRole('button', { name: /Plan/ });
+    await userEvent.click(chip);
+    expect(screen.getAllByRole('menuitemradio').map((e) => e.textContent)).toEqual(['Ask before edits', 'Edit automatically', 'Plan', 'Auto']);
+    await userEvent.click(screen.getByRole('menuitemradio', { name: 'Edit automatically' }));
+    expect(posted).toContainEqual({ t: 'set_mode', mode: 'acceptEdits' });
+    // The chip waits for the sidecar's confirmation.
+    expect(screen.getByRole('button', { name: /Plan/ })).toBeInTheDocument();
+    await push({ t: 'mode', mode: 'acceptEdits' });
+    expect(screen.getByRole('button', { name: /Edit automatically/ })).toBeInTheDocument();
+  });
+
+  test('mode chip defaults to Ask before edits', () => {
+    render(<ModeChip disabled={false} onChange={() => {}} />);
+    expect(screen.getByRole('button', { name: /Ask before edits/ })).toBeInTheDocument();
   });
 });
