@@ -27,6 +27,10 @@ namespace VSClaudio
         private OutputLog _log;
         private volatile string _workspace;
         private volatile string _folderOverride;
+        // VS closes and reopens the same workspace on reload; the teardown waits briefly so that keeps the session.
+        private const int CloseGraceMs = 1000;
+        private string _closedWorkspace;
+        private int _closeGeneration;
 
         public ChatControl()
         {
@@ -111,7 +115,20 @@ namespace VSClaudio
                 var resolved = !string.IsNullOrEmpty(openedFolder) && Directory.Exists(openedFolder)
                     ? openedFolder
                     : await Workspace.ResolveAsync();
-                if (resolved == null || Workspace.SameFolder(resolved, _folderOverride ?? _workspace)) return;
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                if (resolved == null) return;
+
+                var closed = _closedWorkspace;
+                _closedWorkspace = null;
+                Interlocked.Increment(ref _closeGeneration);
+                if (_workspace == null && closed != null && Workspace.SameFolder(resolved, closed))
+                {
+                    // Same workspace reopened before the close took effect: the session is still running in it.
+                    _workspace = closed;
+                    return;
+                }
+
+                if (Workspace.SameFolder(resolved, _folderOverride ?? _workspace)) return;
                 _folderOverride = null;
                 _workspace = resolved;
                 _log.Info($"Workspace changed to {resolved}; starting a new session.");
@@ -126,7 +143,16 @@ namespace VSClaudio
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                 // A folder picked with "Choose folder..." is independent of what VS has open.
                 if (_folderOverride != null || _workspace == null) return;
+                _closedWorkspace = _workspace;
                 _workspace = null;
+                var generation = Interlocked.Increment(ref _closeGeneration);
+
+                try { await Task.Delay(CloseGraceMs, VsShellUtilities.ShutdownToken); }
+                catch (OperationCanceledException) { return; }
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+                if (generation != _closeGeneration || _workspace != null || _folderOverride != null || _bridge == null) return;
+                _closedWorkspace = null;
                 _log.Info("Visual Studio closed its solution or folder; no workspace.");
                 _bridge.SwitchWorkspace();
             }).FileAndForget("VSClaudio/workspace");
