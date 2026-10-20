@@ -3,7 +3,7 @@ import { PROTOCOL_VERSION, type HostCommand, type PermissionMode, type SidecarEv
 import { EditGate } from './editGate';
 import { Inbox } from './inbox';
 import { MODE_LABELS, PermissionBroker } from './permissions';
-import { isLoginError, Translator } from './translate';
+import { isLoginError, PERMISSION_MODES, Translator } from './translate';
 
 export interface QueryLike extends AsyncIterable<any> {
   interrupt(): Promise<unknown>;
@@ -28,6 +28,8 @@ interface Deps {
   log: (s: string) => void;
   readFile: (path: string) => string | null;
   exit: (code: number) => void;
+  // The user's settings defaultMode for a folder; anything but a supported mode means 'default'.
+  resolveDefaultMode: (cwd: string) => Promise<unknown>;
 }
 interface Live {
   q: QueryLike;
@@ -38,9 +40,11 @@ interface Live {
 }
 
 export class SessionController {
-  private cfg: { cwd: string; claudePath: string } | null = null;
+  private cfg: { cwd: string; claudePath: string; startMode: PermissionMode } | null = null;
   private current: Live | null = null;
   private mode: PermissionMode = 'default';
+  // Bumped by each hello and by shutdown, so a hello still resolving its start mode knows it was superseded.
+  private epoch = 0;
 
   constructor(private deps: Deps) {}
 
@@ -73,12 +77,13 @@ export class SessionController {
         if (this.cfg) this.start(undefined);
         return;
       case 'shutdown':
+        this.epoch++;
         this.stop();
         return;
     }
   }
 
-  private hello(cmd: Extract<HostCommand, { t: 'hello' }>): void {
+  private async hello(cmd: Extract<HostCommand, { t: 'hello' }>): Promise<void> {
     if (cmd.protocol !== PROTOCOL_VERSION) {
       this.deps.emit({ t: 'error', code: 'protocol_mismatch', message: `Host protocol ${cmd.protocol}, sidecar protocol ${PROTOCOL_VERSION}.` });
       return;
@@ -93,13 +98,27 @@ export class SessionController {
       return;
     }
     this.stop();
-    this.cfg ={ cwd: cmd.cwd, claudePath };
+    this.cfg = null;
+    const epoch = ++this.epoch;
+    const startMode = await this.startMode(cmd.cwd);
+    if (epoch !== this.epoch) return;
+    this.cfg = { cwd: cmd.cwd, claudePath, startMode };
     this.deps.emit({ t: 'ready', protocol: PROTOCOL_VERSION });
     this.start(cmd.resume);
   }
 
+  private async startMode(cwd: string): Promise<PermissionMode> {
+    try {
+      const mode = await this.deps.resolveDefaultMode(cwd);
+      return PERMISSION_MODES.includes(mode as string) ? (mode as PermissionMode) : 'default';
+    } catch (err: any) {
+      this.deps.log(`could not resolve defaultMode, using default: ${String(err?.message ?? err)}`);
+      return 'default';
+    }
+  }
+
   private start(resume: string | undefined): void {
-    const { cwd, claudePath } = this.cfg!;
+    const { cwd, claudePath, startMode } = this.cfg!;
     const inbox = new Inbox();
     const broker = new PermissionBroker({
       emit: this.deps.emit,
@@ -107,14 +126,14 @@ export class SessionController {
       setMode: (m) => this.setMode(m),
     });
     const gate = new EditGate({ emit: this.deps.emit, log: this.deps.log });
-    this.mode = 'default';
+    this.mode = startMode;
     const q = this.deps.query({
       prompt: inbox,
       options: {
         cwd,
         pathToClaudeCodeExecutable: claudePath,
         includePartialMessages: true,
-        permissionMode: 'default',
+        permissionMode: startMode,
         hooks: { PreToolUse: [{ hooks: [gate.hook] }] },
         resume,
         canUseTool: broker.canUseTool,

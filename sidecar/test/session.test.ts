@@ -37,20 +37,26 @@ class FakeQuery implements QueryLike {
   }
 }
 
-function setup(claude: string | null = 'C:\\claude.exe', trusted = true) {
+function setup(
+  claude: string | null = 'C:\\claude.exe',
+  trusted = true,
+  resolveDefaultMode: (cwd: string) => Promise<unknown> = async () => undefined,
+) {
   const events: SidecarEvent[] = [];
   const queries: FakeQuery[] = [];
   const exits: number[] = [];
+  const logs: string[] = [];
   const ctl = new SessionController({
     query: ({ prompt, options }) => { const q = new FakeQuery(prompt, options); queries.push(q); return q; },
     emit: (e) => events.push(e),
     findClaude: () => claude,
     isTrusted: () => trusted,
-    log: () => {},
+    log: (s) => logs.push(s),
     readFile: () => null,
     exit: (code) => exits.push(code),
+    resolveDefaultMode,
   });
-  return { ctl, events, queries, exits };
+  return { ctl, events, queries, exits, logs };
 }
 const toolOpts = (id = 'u1') => ({ signal: new AbortController().signal, toolUseID: id }) as any;
 const tick = () => new Promise((r) => setTimeout(r, 10));
@@ -60,6 +66,43 @@ test('hello without claude reports claude_not_found and starts nothing', async (
   await ctl.handle({ t: 'hello', protocol: PROTOCOL_VERSION, cwd: 'C:\\w' });
   expect(events).toEqual([{ t: 'error', code: 'claude_not_found', message: expect.stringContaining('Claude Code was not found') }]);
   expect(queries.length).toBe(0);
+});
+
+test('uses the resolved defaultMode when supported', async () => {
+  const cwds: string[] = [];
+  const { ctl, queries } = setup('C:\\claude.exe', true, async (cwd) => { cwds.push(cwd); return 'acceptEdits'; });
+  await ctl.handle({ t: 'hello', protocol: PROTOCOL_VERSION, cwd: 'C:\\w' });
+  expect(cwds).toEqual(['C:\\w']);
+  expect(queries[0].options.permissionMode).toBe('acceptEdits');
+  await ctl.handle({ t: 'new_session' });
+  expect(queries[1].options.permissionMode).toBe('acceptEdits');
+});
+
+test('falls back to default for unsupported or failed resolution', async () => {
+  const cases: [() => Promise<unknown>, string | null][] = [
+    [async () => 'bypassPermissions', null],
+    [async () => undefined, null],
+    [async () => { throw new Error('bad settings'); }, 'bad settings'],
+  ];
+  for (const [resolve, logged] of cases) {
+    const { ctl, queries, events, logs } = setup('C:\\claude.exe', true, resolve);
+    await ctl.handle({ t: 'hello', protocol: PROTOCOL_VERSION, cwd: 'C:\\w' });
+    expect(events).toEqual([{ t: 'ready', protocol: PROTOCOL_VERSION }]);
+    expect(queries[0].options.permissionMode).toBe('default');
+    if (logged) expect(logs.join('')).toContain(logged);
+  }
+});
+
+test('a hello superseded while resolving defaultMode starts nothing', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const { ctl, queries, events } = setup('C:\\claude.exe', true, async () => { await gate; return 'plan'; });
+  const pending = ctl.handle({ t: 'hello', protocol: PROTOCOL_VERSION, cwd: 'C:\\w' });
+  await ctl.handle({ t: 'shutdown' });
+  release();
+  await pending;
+  expect(queries.length).toBe(0);
+  expect(events).toEqual([]);
 });
 
 test('hello with the wrong protocol reports protocol_mismatch', async () => {

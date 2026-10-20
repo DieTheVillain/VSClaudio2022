@@ -1,6 +1,6 @@
 import type { PermissionMode, SidecarEvent } from '../../protocol/src/index';
 
-const PERMISSION_MODES: readonly string[] = ['default', 'acceptEdits', 'plan', 'auto'] satisfies PermissionMode[];
+export const PERMISSION_MODES: readonly string[] = ['default', 'acceptEdits', 'plan', 'auto'] satisfies PermissionMode[];
 
 export const MAX_TOOL_RESULT_CHARS = 20_000;
 

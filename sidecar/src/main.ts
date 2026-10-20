@@ -1,6 +1,7 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
+import { resolveDefaultMode } from './defaultMode';
 import { findClaude } from './findClaude';
 import { createEmitter, readCommands } from './rpc';
 import { SessionController, type QueryFn } from './session';
@@ -26,6 +27,7 @@ const controller = new SessionController({
     log(`session ended; exiting with code ${code}`);
     exitSoon(code);
   },
+  resolveDefaultMode,
 });
 
 let exiting = false;
