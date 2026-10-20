@@ -208,5 +208,16 @@ test('cancelAll cancels every pending request', async () => {
 test('suggestionLabel formats rules', () => {
   expect(suggestionLabel(ruleUpdate('Bash', 'npm test:*'))).toBe('Bash(npm test:*)');
   expect(suggestionLabel({ type: 'addRules', rules: [{ toolName: 'Read' }, { toolName: 'Bash', ruleContent: 'ls' }], behavior: 'allow', destination: 'session' } as PermissionUpdate)).toBe('Read, Bash(ls)');
-  expect(suggestionLabel({ type: 'setMode', mode: 'acceptEdits', destination: 'session' } as PermissionUpdate)).toBe('Always allow');
+});
+
+test('suggestionLabel per type', () => {
+  const label = (u: unknown) => suggestionLabel(u as PermissionUpdate);
+  expect(label({ type: 'replaceRules', rules: [{ toolName: 'Bash', ruleContent: 'ls' }], behavior: 'allow', destination: 'session' })).toBe('Bash(ls)');
+  expect(label({ type: 'setMode', mode: 'default', destination: 'session' })).toBe('switch to Ask before edits');
+  expect(label({ type: 'setMode', mode: 'acceptEdits', destination: 'session' })).toBe('switch to Edit automatically');
+  expect(label({ type: 'setMode', mode: 'plan', destination: 'session' })).toBe('switch to Plan');
+  expect(label({ type: 'setMode', mode: 'auto', destination: 'session' })).toBe('switch to Auto');
+  expect(label({ type: 'addDirectories', directories: ['C:\\a', 'D:\\b c'], destination: 'session' })).toBe('access to C:\\a, D:\\b c');
+  expect(label({ type: 'removeRules', rules: [{ toolName: 'Bash', ruleContent: 'rm:*' }, { toolName: 'Read' }], behavior: 'deny', destination: 'session' })).toBe('remove rule Bash(rm:*), Read');
+  expect(label({ type: 'removeDirectories', directories: ['C:\\a'], destination: 'session' })).toBe('Always allow');
 });

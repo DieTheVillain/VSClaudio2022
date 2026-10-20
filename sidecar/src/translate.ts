@@ -34,7 +34,10 @@ export class Translator {
     if (!msg || msg.parent_tool_use_id) return [];
     switch (msg.type) {
       case 'system':
-        return msg.subtype === 'init' ? this.init(msg) : [];
+        if (msg.subtype === 'init') return this.init(msg);
+        // The CLI reports mode changes it makes itself (e.g. leaving plan mode) on status messages.
+        if (msg.subtype === 'status' && PERMISSION_MODES.includes(msg.permissionMode)) return [{ t: 'mode', mode: msg.permissionMode }];
+        return [];
       case 'stream_event':
         return this.stream(msg.event);
       case 'assistant':

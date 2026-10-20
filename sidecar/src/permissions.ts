@@ -25,11 +25,31 @@ interface Pending {
   settle: (result: PermissionResult, outcome: PermissionOutcome) => void;
 }
 
+export const MODE_LABELS: Record<PermissionMode, string> = {
+  default: 'Ask before edits',
+  acceptEdits: 'Edit automatically',
+  plan: 'Plan',
+  auto: 'Auto',
+};
+
+const formatRules = (rules: { toolName: string; ruleContent?: string }[]) =>
+  rules.map((r) => (r.ruleContent ? `${r.toolName}(${r.ruleContent})` : r.toolName)).join(', ');
+
+// The label is the card's "don't ask again" button text, so it must say what the suggestion actually does.
 export function suggestionLabel(u: PermissionUpdate): string {
-  if (u.type === 'addRules' || u.type === 'replaceRules') {
-    return u.rules.map((r) => (r.ruleContent ? `${r.toolName}(${r.ruleContent})` : r.toolName)).join(', ');
+  switch (u.type) {
+    case 'addRules':
+    case 'replaceRules':
+      return formatRules(u.rules);
+    case 'setMode':
+      return `switch to ${MODE_LABELS[u.mode as PermissionMode] ?? u.mode}`;
+    case 'addDirectories':
+      return `access to ${u.directories.join(', ')}`;
+    case 'removeRules':
+      return `remove rule ${formatRules(u.rules)}`;
+    default:
+      return 'Always allow';
   }
-  return 'Always allow';
 }
 
 export class PermissionBroker {

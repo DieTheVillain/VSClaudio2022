@@ -20,6 +20,18 @@ test('init with an unknown permission mode emits no mode', () => {
   expect(out.map((e) => e.t)).toEqual(['session']);
 });
 
+test('status message with a known permissionMode emits mode', () => {
+  const status = { type: 'system', subtype: 'status', status: null, permissionMode: 'plan', uuid: 'u1', session_id: 's1', parent_tool_use_id: null };
+  expect(new Translator().translate(status)).toEqual([{ t: 'mode', mode: 'plan' }]);
+});
+
+test('unknown mode emits nothing', () => {
+  const tr = new Translator();
+  const status = { type: 'system', subtype: 'status', status: null, uuid: 'u1', session_id: 's1', parent_tool_use_id: null };
+  expect(tr.translate({ ...status, permissionMode: 'bypassPermissions' })).toEqual([]);
+  expect(tr.translate(status)).toEqual([]);
+});
+
 test('streamed text and thinking become block_start/block_delta keyed by message and index', () => {
   const tr = new Translator();
   const out = [

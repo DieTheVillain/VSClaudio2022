@@ -2,7 +2,7 @@ import type { Options, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { PROTOCOL_VERSION, type HostCommand, type PermissionMode, type SidecarEvent } from '../../protocol/src/index';
 import { EditGate } from './editGate';
 import { Inbox } from './inbox';
-import { PermissionBroker } from './permissions';
+import { MODE_LABELS, PermissionBroker } from './permissions';
 import { isLoginError, Translator } from './translate';
 
 export interface QueryLike extends AsyncIterable<any> {
@@ -11,13 +11,6 @@ export interface QueryLike extends AsyncIterable<any> {
   close(): void;
 }
 export type QueryFn = (args: { prompt: AsyncIterable<SDKUserMessage>; options: Options }) => QueryLike;
-
-const MODE_LABELS: Record<PermissionMode, string> = {
-  default: 'Ask before edits',
-  acceptEdits: 'Edit automatically',
-  plan: 'Plan',
-  auto: 'Auto',
-};
 
 const NOT_FOUND =
   'Claude Code was not found. Install it (https://claude.com/claude-code), run `claude` once in a terminal to log in, then click Retry.';
