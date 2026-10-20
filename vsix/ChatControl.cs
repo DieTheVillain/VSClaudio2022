@@ -7,6 +7,7 @@ using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using Community.VisualStudio.Toolkit;
+using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.PlatformUI;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.Web.WebView2.Core;
@@ -62,7 +63,12 @@ namespace VSClaudio
         private async Task InitAsync()
         {
             _log = await OutputLog.CreateAsync();
+
+            // Subscribe before the first resolve: when VS restores this panel at startup the folder can finish
+            // opening while the initial resolve is still in flight, and an event fired in that gap would be lost.
+            SubscribeWorkspaceTriggers();
             _workspace = await Workspace.ResolveAsync();
+            _log.Info($"Initial workspace: {_workspace ?? "(none)"}");
 
             var extensionDir = Path.GetDirectoryName(typeof(ChatControl).Assembly.Location);
             var sidecarExe = Path.Combine(extensionDir, "sidecar", "vsclaudio-sidecar.exe");
@@ -70,10 +76,8 @@ namespace VSClaudio
             _bridge.ChooseFolderRequested += ChooseFolder;
             _log.Info($"Sidecar: {sidecarExe}; workspace: {_workspace ?? "(none)"}");
 
-            VS.Events.SolutionEvents.OnAfterOpenSolution += _ => OnWorkspaceMayHaveChanged();
-            VS.Events.SolutionEvents.OnAfterOpenFolder += folder => OnWorkspaceMayHaveChanged(folder);
-            VS.Events.SolutionEvents.OnAfterCloseSolution += OnWorkspaceClosed;
-            VS.Events.SolutionEvents.OnAfterCloseFolder += _ => OnWorkspaceClosed();
+            // Catches a workspace that finished loading between the resolve above and the bridge existing.
+            OnWorkspaceMayHaveChanged(null, "init");
             VSColorTheme.ThemeChanged += _ => _bridge.PostTheme(ThemeVars.Current());
 
             var dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VSClaudio", "WebView2");
@@ -108,13 +112,48 @@ namespace VSClaudio
             core.Navigate(Origin + "index.html");
         }
 
-        private void OnWorkspaceMayHaveChanged(string openedFolder = null)
+        private void SubscribeWorkspaceTriggers()
+        {
+            VS.Events.SolutionEvents.OnAfterOpenSolution += _ => { _log.Info("Event: OnAfterOpenSolution"); OnWorkspaceMayHaveChanged(null, "OnAfterOpenSolution"); };
+            VS.Events.SolutionEvents.OnAfterOpenFolder += folder => { _log.Info($"Event: OnAfterOpenFolder '{folder}'"); OnWorkspaceMayHaveChanged(folder, "OnAfterOpenFolder"); };
+            VS.Events.SolutionEvents.OnAfterCloseSolution += () => { _log.Info("Event: OnAfterCloseSolution"); OnWorkspaceClosed(); };
+            VS.Events.SolutionEvents.OnAfterCloseFolder += folder => { _log.Info($"Event: OnAfterCloseFolder '{folder}'"); OnWorkspaceClosed(); };
+
+            // Context state cannot be missed the way an event can: WhenActivated runs at once if already active.
+            ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                foreach (var guid in new[] { VSConstants.UICONTEXT.FolderOpened_guid, VSConstants.UICONTEXT.SolutionExistsAndFullyLoaded_guid })
+                {
+                    var context = UIContext.FromUIContextGuid(guid);
+                    var name = guid == VSConstants.UICONTEXT.FolderOpened_guid ? "FolderOpened" : "SolutionExistsAndFullyLoaded";
+                    context.WhenActivated(() => { _log.Info($"UI context active: {name}"); OnWorkspaceMayHaveChanged(null, name); });
+                    context.UIContextChanged += (_, e) =>
+                    {
+                        if (!e.Activated) return;
+                        _log.Info($"UI context activated: {name}");
+                        OnWorkspaceMayHaveChanged(null, name);
+                    };
+                }
+            }).FileAndForget("VSClaudio/workspace");
+        }
+
+        private void OnWorkspaceMayHaveChanged(string openedFolder, string source)
         {
             ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
             {
-                var resolved = !string.IsNullOrEmpty(openedFolder) && Directory.Exists(openedFolder)
-                    ? openedFolder
-                    : await Workspace.ResolveAsync();
+                string resolved = null;
+                // The folder can still be loading when the trigger fires, so a null result is retried briefly.
+                for (var attempt = 0; attempt < 3; attempt++)
+                {
+                    resolved = !string.IsNullOrEmpty(openedFolder) && Directory.Exists(openedFolder)
+                        ? openedFolder
+                        : await Workspace.ResolveAsync();
+                    _log.Info($"Resolve ({source}, attempt {attempt + 1}): {resolved ?? "(none)"}");
+                    if (resolved != null) break;
+                    try { await Task.Delay(500, VsShellUtilities.ShutdownToken); }
+                    catch (OperationCanceledException) { return; }
+                }
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                 if (resolved == null) return;
 
@@ -132,7 +171,8 @@ namespace VSClaudio
                 _folderOverride = null;
                 _workspace = resolved;
                 _log.Info($"Workspace changed to {resolved}; starting a new session.");
-                _bridge.SwitchWorkspace();
+                // Before the bridge exists the workspace func simply reads the value set above.
+                _bridge?.SwitchWorkspace();
             }).FileAndForget("VSClaudio/workspace");
         }
 
