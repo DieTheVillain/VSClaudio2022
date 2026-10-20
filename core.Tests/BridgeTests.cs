@@ -164,6 +164,18 @@ namespace VSClaudio.Core.Tests
         }
 
         [Fact]
+        public void NeedsWorkspaceIsTrueOnlyWhileShowingNoWorkspace()
+        {
+            _workspace = null;
+            Ready();
+            Assert.True(_bridge.NeedsWorkspace);
+            _workspace = @"D:\Found";
+            _bridge.SwitchWorkspace();
+            Assert.False(_bridge.NeedsWorkspace);
+            Assert.Single(_sidecars);
+        }
+
+        [Fact]
         public void StaleSidecarIsIgnored()
         {
             Ready();

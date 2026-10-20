@@ -160,17 +160,21 @@ namespace VSClaudio
                 var closed = _closedWorkspace;
                 _closedWorkspace = null;
                 Interlocked.Increment(ref _closeGeneration);
-                if (_workspace == null && closed != null && Workspace.SameFolder(resolved, closed))
+                // The panel is showing "No folder open" with nothing running, so any resolved workspace must connect,
+                // even if it equals what was recorded earlier (e.g. recorded before the webview was ready).
+                var idle = _folderOverride == null && _bridge != null && _bridge.NeedsWorkspace;
+
+                if (!idle && _workspace == null && closed != null && Workspace.SameFolder(resolved, closed))
                 {
                     // Same workspace reopened before the close took effect: the session is still running in it.
                     _workspace = closed;
                     return;
                 }
 
-                if (Workspace.SameFolder(resolved, _folderOverride ?? _workspace)) return;
+                if (!idle && Workspace.SameFolder(resolved, _folderOverride ?? _workspace)) return;
                 _folderOverride = null;
                 _workspace = resolved;
-                _log.Info($"Workspace changed to {resolved}; starting a new session.");
+                _log.Info(idle ? $"Workspace available ({resolved}); connecting." : $"Workspace changed to {resolved}; starting a new session.");
                 // Before the bridge exists the workspace func simply reads the value set above.
                 _bridge?.SwitchWorkspace();
             }).FileAndForget("VSClaudio/workspace");

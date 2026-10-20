@@ -113,6 +113,12 @@ namespace VSClaudio.Core
             lock (_gate) ConnectLocked(_sessionId);
         }
 
+        /// <summary>True while the panel is showing "no workspace", so a workspace that appears must start a session.</summary>
+        public bool NeedsWorkspace
+        {
+            get { lock (_gate) return State == "no_workspace"; }
+        }
+
         public void SwitchWorkspace()
         {
             lock (_gate)
