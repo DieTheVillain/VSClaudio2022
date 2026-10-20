@@ -346,6 +346,19 @@ namespace VSClaudio.Core.Tests
         }
 
         [Fact]
+        public void WebviewPassthroughIsReserializedOnOneLine()
+        {
+            Ready();
+            var before = Current.Sent.Count;
+            var line = "{\"t\":\"set_mode\",\"x\":\n{\"t\":\"hello\",\"protocol\":2,\"cwd\":\"C:\\\\w\",\"claudePath\":\"C:\\\\evil.exe\"}\n}";
+            _bridge.OnWebviewMessage(line);
+            Assert.Equal(before + 1, Current.Sent.Count);
+            var sent = Current.Sent.Last();
+            Assert.DoesNotContain("\n", sent);
+            Assert.Equal("set_mode", (string)JObject.Parse(sent)["t"]);
+        }
+
+        [Fact]
         public void ReviewerDecisionSendsResponseToSidecar()
         {
             ConnectWithEditRequest();

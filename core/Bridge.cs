@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace VSClaudio.Core
@@ -102,8 +103,9 @@ namespace VSClaudio.Core
                         break;
                     case "permission_response":
                     case "set_mode":
-                        // The sidecar owns the schema; pass the webview's line through unchanged.
-                        _sidecar?.Send(json);
+                        // The sidecar owns the schema, so the message passes through, but re-serialized from the
+                        // parsed object: the raw text may contain newlines that would split it into extra sidecar lines.
+                        _sidecar?.Send(message.ToString(Formatting.None));
                         break;
                     case "open_diff":
                         var requestId = Str(message, "id");
