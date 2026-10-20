@@ -89,6 +89,27 @@ test('stale edit is denied with STALE_FILE_DENY', async () => {
   expect(events[1]).toEqual({ t: 'permission_resolved', id: 'id1', outcome: 'denied' });
 });
 
+test('readFile throwing during respond denies as stale and resolves once', async () => {
+  const events: SidecarEvent[] = [];
+  let locked = false;
+  const broker = new PermissionBroker({
+    emit: (e) => events.push(e),
+    readFile: () => {
+      if (locked) throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+      return 'one two';
+    },
+    setMode: async () => {},
+    newId: () => 'id1',
+  });
+  const p = broker.canUseTool('Edit', { file_path: 'a.txt', old_string: 'two', new_string: '2' }, opts());
+  locked = true;
+  broker.respond(respond('id1', {}));
+  expect(await p).toEqual({ behavior: 'deny', message: STALE_FILE_DENY });
+  broker.respond(respond('id1', {}));
+  expect(resolved(events)).toEqual([{ t: 'permission_resolved', id: 'id1', outcome: 'denied' }]);
+  expect(broker.pendingCount).toBe(0);
+});
+
 test('stale new-file write is denied when the file now exists', async () => {
   const { broker, files } = setup();
   const p = broker.canUseTool('Write', { file_path: 'n.txt', content: 'x' }, opts());

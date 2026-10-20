@@ -149,7 +149,13 @@ export class PermissionBroker {
   private isStale(edit: NonNullable<Pending['edit']>): boolean {
     // Over the preview cutoff the original was not captured, so there is nothing to compare against.
     if (edit.tooLarge) return false;
-    const now = this.deps.readFile(edit.path);
+    let now: string | null;
+    try {
+      now = this.deps.readFile(edit.path);
+    } catch {
+      // A file that can't be read now (EBUSY, EACCES on Windows) can't be shown to match, so deny the edit.
+      return true;
+    }
     return edit.isNewFile ? now !== null : now !== edit.original;
   }
 }
