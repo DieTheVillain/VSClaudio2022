@@ -19,7 +19,7 @@ namespace VSClaudio
     public sealed class ChatControl : UserControl, IWebviewPoster
     {
         private const string Origin = "https://vsclaudio.local/";
-        private readonly WebView2 _web = new WebView2();
+        private readonly WebView2 _web = new ChatWebView();
         private readonly ConcurrentQueue<string> _outbox = new ConcurrentQueue<string>();
         private int _drainScheduled;
         private bool _started;
