@@ -67,7 +67,9 @@ namespace VSClaudio
             _log.Info($"Sidecar: {sidecarExe}; workspace: {_workspace ?? "(none)"}");
 
             VS.Events.SolutionEvents.OnAfterOpenSolution += _ => OnWorkspaceMayHaveChanged();
-            VS.Events.SolutionEvents.OnAfterOpenFolder += _ => OnWorkspaceMayHaveChanged();
+            VS.Events.SolutionEvents.OnAfterOpenFolder += folder => OnWorkspaceMayHaveChanged(folder);
+            VS.Events.SolutionEvents.OnAfterCloseSolution += OnWorkspaceClosed;
+            VS.Events.SolutionEvents.OnAfterCloseFolder += _ => OnWorkspaceClosed();
             VSColorTheme.ThemeChanged += _ => _bridge.PostTheme(ThemeVars.Current());
 
             var dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VSClaudio", "WebView2");
@@ -102,15 +104,30 @@ namespace VSClaudio
             core.Navigate(Origin + "index.html");
         }
 
-        private void OnWorkspaceMayHaveChanged()
+        private void OnWorkspaceMayHaveChanged(string openedFolder = null)
         {
             ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
             {
-                var resolved = await Workspace.ResolveAsync();
+                var resolved = !string.IsNullOrEmpty(openedFolder) && Directory.Exists(openedFolder)
+                    ? openedFolder
+                    : await Workspace.ResolveAsync();
                 if (resolved == null || Workspace.SameFolder(resolved, _folderOverride ?? _workspace)) return;
                 _folderOverride = null;
                 _workspace = resolved;
                 _log.Info($"Workspace changed to {resolved}; starting a new session.");
+                _bridge.SwitchWorkspace();
+            }).FileAndForget("VSClaudio/workspace");
+        }
+
+        private void OnWorkspaceClosed()
+        {
+            ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                // A folder picked with "Choose folder..." is independent of what VS has open.
+                if (_folderOverride != null || _workspace == null) return;
+                _workspace = null;
+                _log.Info("Visual Studio closed its solution or folder; no workspace.");
                 _bridge.SwitchWorkspace();
             }).FileAndForget("VSClaudio/workspace");
         }

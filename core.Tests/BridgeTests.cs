@@ -223,6 +223,18 @@ namespace VSClaudio.Core.Tests
         }
 
         [Fact]
+        public void SwitchWorkspaceWithNoWorkspaceStopsTheSessionAndPostsNoWorkspace()
+        {
+            Ready();
+            var first = Current;
+            _workspace = null;
+            _bridge.SwitchWorkspace();
+            Assert.True(first.Stopped);
+            Assert.Single(_sidecars);
+            Assert.Equal("no_workspace", (string)PostedStatuses().Last()["state"]);
+        }
+
+        [Fact]
         public void DisposeShutsDownSidecar()
         {
             Ready();
