@@ -67,13 +67,21 @@ namespace VSClaudio
             // Subscribe before the first resolve: when VS restores this panel at startup the folder can finish
             // opening while the initial resolve is still in flight, and an event fired in that gap would be lost.
             SubscribeWorkspaceTriggers();
-            _workspace = await Workspace.ResolveAsync();
-            _log.Info($"Initial workspace: {_workspace ?? "(none)"}");
+            var initial = await Workspace.ResolveAsync();
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+            // A trigger may already have found the workspace while this resolve was in flight.
+            if (initial != null || _workspace == null) _workspace = initial ?? _workspace;
+            _log.Info($"Initial workspace: {initial ?? "(none)"} (current: {_workspace ?? "(none)"})");
 
             var extensionDir = Path.GetDirectoryName(typeof(ChatControl).Assembly.Location);
             var sidecarExe = Path.Combine(extensionDir, "sidecar", "vsclaudio-sidecar.exe");
             _bridge = new Bridge(() => new SidecarProcess(sidecarExe, "", _log), this, _log, () => _folderOverride ?? _workspace, new EditReviewer(_log), new EditorBuffers(_log));
             _bridge.ChooseFolderRequested += ChooseFolder;
+            _bridge.WorkspaceNeeded += () =>
+            {
+                _log.Info("Workspace needed; re-resolving.");
+                OnWorkspaceMayHaveChanged(null, "WorkspaceNeeded");
+            };
             _log.Info($"Sidecar: {sidecarExe}; workspace: {_workspace ?? "(none)"}");
 
             // Catches a workspace that finished loading between the resolve above and the bridge existing.

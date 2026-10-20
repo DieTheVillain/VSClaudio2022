@@ -176,6 +176,40 @@ namespace VSClaudio.Core.Tests
         }
 
         [Fact]
+        public void WorkspaceNeededRaisedOnceOutsideLockWhenNoWorkspace()
+        {
+            _workspace = null;
+            var raised = 0;
+            _bridge.WorkspaceNeeded += () =>
+            {
+                raised++;
+                // Re-entering the bridge from the handler must not deadlock.
+                _workspace = @"D:\Found";
+                _bridge.SwitchWorkspace();
+            };
+            Ready();
+            Assert.Equal(1, raised);
+            Assert.Single(_sidecars);
+            Assert.False(_bridge.NeedsWorkspace);
+
+            _workspace = null;
+            _bridge.SwitchWorkspace();
+            Assert.Equal(2, raised);
+        }
+
+        [Fact]
+        public void WorkspaceNeededNotRaisedAgainWhileStillWithoutWorkspace()
+        {
+            _workspace = null;
+            var raised = 0;
+            _bridge.WorkspaceNeeded += () => raised++;
+            Ready();
+            _bridge.Reconnect();
+            _bridge.SwitchWorkspace();
+            Assert.Equal(1, raised);
+        }
+
+        [Fact]
         public void StaleSidecarIsIgnored()
         {
             Ready();

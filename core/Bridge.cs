@@ -42,6 +42,23 @@ namespace VSClaudio.Core
 
         public event Action ChooseFolderRequested;
 
+        /// <summary>Raised, outside the lock, each time the bridge moves into "no_workspace" from another state.</summary>
+        public event Action WorkspaceNeeded;
+
+        private bool _workspaceNeededPending;
+
+        private void RaiseWorkspaceNeeded()
+        {
+            Action handler = null;
+            lock (_gate)
+            {
+                if (!_workspaceNeededPending) return;
+                _workspaceNeededPending = false;
+                handler = WorkspaceNeeded;
+            }
+            handler?.Invoke();
+        }
+
         public void OnWebviewMessage(string json)
         {
             var message = Protocol.TryParse(json);
@@ -106,11 +123,13 @@ namespace VSClaudio.Core
 
             // Raised outside the lock: the handler shows a modal dialog and then calls Reconnect().
             raise?.Invoke();
+            RaiseWorkspaceNeeded();
         }
 
         public void Reconnect()
         {
             lock (_gate) ConnectLocked(_sessionId);
+            RaiseWorkspaceNeeded();
         }
 
         /// <summary>True while the panel is showing "no workspace", so a workspace that appears must start a session.</summary>
@@ -127,6 +146,7 @@ namespace VSClaudio.Core
                 _turnRunning = false;
                 ConnectLocked(null, "workspace_changed");
             }
+            RaiseWorkspaceNeeded();
         }
 
         public void PostTheme(IDictionary<string, string> vars)
@@ -151,6 +171,7 @@ namespace VSClaudio.Core
             var cwd = _workspace();
             if (string.IsNullOrEmpty(cwd))
             {
+                if (State != "no_workspace") _workspaceNeededPending = true;
                 SetStateLocked("no_workspace");
                 return;
             }
