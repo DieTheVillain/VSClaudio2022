@@ -8,13 +8,17 @@ namespace VSClaudio
     /// </summary>
     /// <remarks>
     /// Keys typed into the browser never reach Visual Studio's message loop. WebView2 instead reports
-    /// non-character keys (Home, End, Delete, arrows, anything with Ctrl) through AcceleratorKeyPressed,
-    /// and the WPF control replays them as PreviewKeyDown followed by a bubbling KeyDown. If any WPF
-    /// ancestor marks that KeyDown handled, the browser drops the key. The docking tab groups that host
-    /// tool windows derive from TabControl, whose OnKeyDown treats Home and End as "select first/last tab",
-    /// so End in the composer switched documents and Home was swallowed. For the keys below we skip the
-    /// bubbling KeyDown/KeyUp and leave the event unhandled, so the page receives them. Every other key
-    /// keeps the default path, so Ctrl+Tab, F-keys and Alt shortcuts still reach Visual Studio.
+    /// non-character keys (Home, End, Delete, arrows, anything with Ctrl) through AcceleratorKeyPressed.
+    /// The WPF control raises a PreviewKeyDown (or PreviewKeyUp) on itself with those event args and
+    /// copies the args' Handled flag back, so a handled key is withheld from the browser. Its
+    /// OnPreviewKeyDown/OnPreviewKeyUp override then re-raises the same args as a bubbling KeyDown/KeyUp,
+    /// and any WPF ancestor that marks that bubbling event handled makes the browser drop the key. The
+    /// docking tab groups that host tool windows derive from TabControl, whose OnKeyDown treats Home and
+    /// End as "select first/last tab", so End in the composer switched documents and Home was swallowed.
+    /// For the keys below this class overrides OnPreviewKeyDown/OnPreviewKeyUp without calling the base,
+    /// so the bubbling KeyDown/KeyUp is never raised, the args stay unhandled and the page receives the
+    /// key. Ancestors still see the tunnelling PreviewKeyDown/PreviewKeyUp. Every other key keeps the
+    /// default path, so Ctrl+Tab, F-keys and Alt shortcuts still reach Visual Studio.
     /// </remarks>
     internal sealed class ChatWebView : WebView2
     {
