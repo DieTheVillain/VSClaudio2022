@@ -9,8 +9,11 @@ namespace VSClaudio
 {
     internal static class Workspace
     {
-        /// <summary>The open solution's folder, the open folder, or the active document's folder; null if none.</summary>
-        public static async Task<string> ResolveAsync()
+        /// <summary>
+        /// The open solution's folder, the open folder, or (only when <paramref name="allowActiveDocumentFallback"/>
+        /// is set) the active document's folder; null if none.
+        /// </summary>
+        public static async Task<string> ResolveAsync(bool allowActiveDocumentFallback)
         {
             var openFolder = await OpenSolutionDirectoryAsync();
             if (openFolder != null) return openFolder;
@@ -23,6 +26,7 @@ namespace VSClaudio
                 if (File.Exists(path)) return Path.GetDirectoryName(path);
             }
 
+            if (!allowActiveDocumentFallback) return null;
             var doc = await VS.Documents.GetActiveDocumentViewAsync();
             var file = doc?.FilePath;
             return string.IsNullOrEmpty(file) ? null : Path.GetDirectoryName(file);

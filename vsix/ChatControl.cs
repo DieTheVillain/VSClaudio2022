@@ -32,6 +32,12 @@ namespace VSClaudio
         private const int CloseGraceMs = 1000;
         private string _closedWorkspace;
         private int _closeGeneration;
+        // Counts every close VS reports. A resolve that started before a close may have read the closed
+        // workspace, so its result is dropped.
+        private int _closeCount;
+        // Set when VS closes its solution or folder and cleared only by a real open, so the "workspace needed"
+        // re-resolve cannot reconnect the panel to a loose file's folder or the folder that was just closed.
+        private volatile bool _closedByVs;
 
         public ChatControl()
         {
@@ -67,8 +73,15 @@ namespace VSClaudio
             // Subscribe before the first resolve: when VS restores this panel at startup the folder can finish
             // opening while the initial resolve is still in flight, and an event fired in that gap would be lost.
             SubscribeWorkspaceTriggers();
-            var initial = await Workspace.ResolveAsync();
+            var closesAtStart = Volatile.Read(ref _closeCount);
+            // Only this first resolve falls back to the active document's folder.
+            var initial = await Workspace.ResolveAsync(allowActiveDocumentFallback: true);
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+            if (initial != null && closesAtStart != Volatile.Read(ref _closeCount))
+            {
+                _log.Info($"Ignoring stale resolve (closed since): {initial}");
+                initial = null;
+            }
             // A trigger may already have found the workspace while this resolve was in flight.
             if (initial != null || _workspace == null) _workspace = initial ?? _workspace;
             _log.Info($"Initial workspace: {initial ?? "(none)"} (current: {_workspace ?? "(none)"})");
@@ -79,6 +92,11 @@ namespace VSClaudio
             _bridge.ChooseFolderRequested += ChooseFolder;
             _bridge.WorkspaceNeeded += () =>
             {
+                if (_closedByVs)
+                {
+                    _log.Info("Workspace closed by VS; waiting for an open.");
+                    return;
+                }
                 _log.Info("Workspace needed; re-resolving.");
                 OnWorkspaceMayHaveChanged(null, "WorkspaceNeeded");
             };
@@ -122,8 +140,8 @@ namespace VSClaudio
 
         private void SubscribeWorkspaceTriggers()
         {
-            VS.Events.SolutionEvents.OnAfterOpenSolution += _ => { _log.Info("Event: OnAfterOpenSolution"); OnWorkspaceMayHaveChanged(null, "OnAfterOpenSolution"); };
-            VS.Events.SolutionEvents.OnAfterOpenFolder += folder => { _log.Info($"Event: OnAfterOpenFolder '{folder}'"); OnWorkspaceMayHaveChanged(folder, "OnAfterOpenFolder"); };
+            VS.Events.SolutionEvents.OnAfterOpenSolution += _ => { _log.Info("Event: OnAfterOpenSolution"); OnWorkspaceOpened(null, "OnAfterOpenSolution"); };
+            VS.Events.SolutionEvents.OnAfterOpenFolder += folder => { _log.Info($"Event: OnAfterOpenFolder '{folder}'"); OnWorkspaceOpened(folder, "OnAfterOpenFolder"); };
             VS.Events.SolutionEvents.OnAfterCloseSolution += () => { _log.Info("Event: OnAfterCloseSolution"); OnWorkspaceClosed(); };
             VS.Events.SolutionEvents.OnAfterCloseFolder += folder => { _log.Info($"Event: OnAfterCloseFolder '{folder}'"); OnWorkspaceClosed(); };
 
@@ -135,19 +153,28 @@ namespace VSClaudio
                 {
                     var context = UIContext.FromUIContextGuid(guid);
                     var name = guid == VSConstants.UICONTEXT.FolderOpened_guid ? "FolderOpened" : "SolutionExistsAndFullyLoaded";
-                    context.WhenActivated(() => { _log.Info($"UI context active: {name}"); OnWorkspaceMayHaveChanged(null, name); });
+                    context.WhenActivated(() => { _log.Info($"UI context active: {name}"); OnWorkspaceOpened(null, name); });
                     context.UIContextChanged += (_, e) =>
                     {
                         if (!e.Activated) return;
                         _log.Info($"UI context activated: {name}");
-                        OnWorkspaceMayHaveChanged(null, name);
+                        OnWorkspaceOpened(null, name);
                     };
                 }
             }).FileAndForget("VSClaudio/workspace");
         }
 
+        // A real open (an open event, or a UI context activating after the close) ends the "closed by VS" state.
+        private void OnWorkspaceOpened(string openedFolder, string source)
+        {
+            if (_closedByVs) _log.Info($"Workspace opened ({source}) after a close by VS.");
+            _closedByVs = false;
+            OnWorkspaceMayHaveChanged(openedFolder, source);
+        }
+
         private void OnWorkspaceMayHaveChanged(string openedFolder, string source)
         {
+            var closesAtStart = Volatile.Read(ref _closeCount);
             ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
             {
                 string resolved = null;
@@ -156,7 +183,7 @@ namespace VSClaudio
                 {
                     resolved = !string.IsNullOrEmpty(openedFolder) && Directory.Exists(openedFolder)
                         ? openedFolder
-                        : await Workspace.ResolveAsync();
+                        : await Workspace.ResolveAsync(allowActiveDocumentFallback: false);
                     _log.Info($"Resolve ({source}, attempt {attempt + 1}): {resolved ?? "(none)"}");
                     if (resolved != null) break;
                     try { await Task.Delay(500, VsShellUtilities.ShutdownToken); }
@@ -164,6 +191,12 @@ namespace VSClaudio
                 }
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                 if (resolved == null) return;
+                if (closesAtStart != Volatile.Read(ref _closeCount))
+                {
+                    // Started before a close, so it may have read the workspace that has since closed.
+                    _log.Info($"Ignoring stale resolve (closed since): {resolved} ({source})");
+                    return;
+                }
 
                 var closed = _closedWorkspace;
                 _closedWorkspace = null;
@@ -190,6 +223,9 @@ namespace VSClaudio
 
         private void OnWorkspaceClosed()
         {
+            // Recorded synchronously in the close event so that resolves already in flight see it.
+            Interlocked.Increment(ref _closeCount);
+            _closedByVs = true;
             ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
             {
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
