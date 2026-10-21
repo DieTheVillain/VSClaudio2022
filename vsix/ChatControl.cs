@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -110,8 +110,10 @@ namespace VSClaudio
             var env = await CoreWebView2Environment.CreateAsync(null, dataDir);
             await _web.EnsureCoreWebView2Async(env);
             var core = _web.CoreWebView2;
-            // No Reload menu or browser shortcuts: a reload drops the transcript mid-session.
-            core.Settings.AreDefaultContextMenusEnabled = false;
+            // No browser shortcuts: a reload drops the transcript mid-session. The default context menu stays
+            // enabled so editing works; ContextMenuRequested strips it down (no Reload/Back/Save as/Inspect).
+            core.Settings.AreDefaultContextMenusEnabled = true;
+            core.ContextMenuRequested += OnContextMenuRequested;
             core.Settings.AreBrowserAcceleratorKeysEnabled = false;
             core.ProcessFailed += (s, e) =>
             {
@@ -255,6 +257,46 @@ namespace VSClaudio
                 _folderOverride = dialog.SelectedPath;
             }
             _bridge.Reconnect();
+        }
+
+        // Item names are the English label in lower camel case (CoreWebView2ContextMenuItem.Name docs).
+        private static readonly System.Collections.Generic.HashSet<string> AllowedMenuItems =
+            new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal)
+            { "cut", "copy", "paste", "selectAll", "spellCheck", "addToDictionary" };
+        private bool _loggedMenuNames;
+
+        private void OnContextMenuRequested(object sender, CoreWebView2ContextMenuRequestedEventArgs e)
+        {
+            try
+            {
+                var items = e.MenuItems;
+                var kept = new System.Collections.Generic.List<string>();
+                var removed = new System.Collections.Generic.List<string>();
+                for (int i = items.Count - 1; i >= 0; i--)
+                {
+                    var item = items[i];
+                    if (item.Kind == CoreWebView2ContextMenuItemKind.Separator) continue;
+                    if (AllowedMenuItems.Contains(item.Name)) kept.Insert(0, item.Name);
+                    else { removed.Insert(0, item.Name); items.RemoveAt(i); }
+                }
+                // Drop separators left leading, trailing or doubled after the removals.
+                for (int i = items.Count - 1; i >= 0; i--)
+                {
+                    if (items[i].Kind != CoreWebView2ContextMenuItemKind.Separator) continue;
+                    if (i == 0 || i == items.Count - 1 || items[i - 1].Kind == CoreWebView2ContextMenuItemKind.Separator)
+                        items.RemoveAt(i);
+                }
+                if (!_loggedMenuNames)
+                {
+                    _loggedMenuNames = true;
+                    _log.Info($"Context menu kept: [{string.Join(", ", kept)}]; removed: [{string.Join(", ", removed)}]");
+                }
+                if (items.Count == 0) e.Handled = true;
+            }
+            catch (Exception ex)
+            {
+                try { _log.Info($"Context menu filter failed: {ex.Message}"); } catch { }
+            }
         }
 
         private void OpenExternal(string uri)
